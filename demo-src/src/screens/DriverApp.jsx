@@ -3,6 +3,7 @@ import { useStore, payroll, shiftPay, fmt, nowLabel, STATUS, taskActions } from 
 import { DAYS, DRIVERS, OBJECTS } from '../data.js';
 import { Logo, Button, Badge, Modal, Field, Icon } from '../ui.jsx';
 import { unitName } from './Overview.jsx';
+import FuelCard from './FuelCard.jsx';
 
 const ME = 'd1';
 const WD = ['чт', 'пт', 'сб', 'вс', 'пн', 'вт', 'ср'];
@@ -48,6 +49,12 @@ export default function DriverApp() {
               <Button variant="primary" size="lg" onClick={() => setModal('shift')}><Icon name="camera" />Смена</Button>
               <Button size="lg" onClick={() => setModal('break')}><Icon name="wrench" />Поломка</Button>
             </div>
+
+            {(state.cards || []).filter(c => c.unitId === me.unitId).map(c => (
+              <section key={c.id} className="card" style={{ padding: 14 }}>
+                <FuelCard card={c} role="driver" compact />
+              </section>
+            ))}
 
             {myTasks.length > 0 && (
               <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

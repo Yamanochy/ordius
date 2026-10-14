@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useStore, STATUS, fmt } from '../store.jsx';
 import { TERMS, HISTORY, DRIVERS } from '../data.js';
 import { PageHead, Badge, Table, Button } from '../ui.jsx';
+import FuelCard, { maskNumber } from './FuelCard.jsx';
 
 const UNIT_ST = { line: ['На линии', 'success'], repair: ['В ремонте', 'danger'], idle: ['Простой', 'warning'] };
 const TERM_C = { ok: 'var(--success)', soon: 'var(--warning)', bad: 'var(--danger)' };
@@ -14,6 +15,7 @@ export default function Fleet({ role, go }) {
   const repairs = state.tasks.filter(t => t.unitId === u.id && t.parentId === null && t.kind === 'repair');
   const parts = state.tasks.filter(t => t.unitId === u.id && t.kind === 'supply').reduce((a, t) => a + (t.price || 0), 0);
   const st = UNIT_ST[u.status];
+  const card = (state.cards || []).find(c => c.unitId === u.id);
 
   return (
     <>
@@ -53,6 +55,11 @@ export default function Fleet({ role, go }) {
           </section>
 
           <section className="card card-pad">
+            <h2>Топливная карта</h2>
+            {card ? <FuelCard card={card} role={role} /> : <p className="muted" style={{ margin: 0 }}>К этой машине карта не привязана.</p>}
+          </section>
+
+          <section className="card card-pad">
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <h2>Ремонты этой машины</h2>
               {parts > 0 && <span className="muted" style={{ fontSize: 13 }}>запчасти по текущим заявкам: <b className="num">{fmt(parts)}</b></span>}
@@ -77,6 +84,23 @@ export default function Fleet({ role, go }) {
           />
         </div>
       </div>
+
+      <Table
+        title="Все топливные карты"
+        columns={[
+          { key: 'number', label: 'Номер карты', render: v => <span className="num">{role === 'owner' ? v : maskNumber(v)}</span> },
+          { key: 'unit', label: 'Привязана к технике' },
+          { key: 'driver', label: 'Водитель' },
+          { key: 'limit', label: 'Лимит' },
+          { key: 'spent', label: 'Октябрь, л', right: true },
+          { key: 'status', label: 'Статус', render: v => v === 'blocked' ? <Badge tone="danger">Заблокирована</Badge> : <Badge tone="success">Активна</Badge> }
+        ]}
+        rows={(state.cards || []).map(c => {
+          const un = state.units.find(x => x.id === c.unitId);
+          const dr = DRIVERS.find(d => d.unitId === c.unitId);
+          return { id: c.id, number: c.number, unit: un ? un.name + ' · ' + un.plate : '—', driver: dr ? dr.name : '—', limit: c.limit, spent: c.spent.toLocaleString('ru-RU'), status: c.status };
+        })}
+      />
     </>
   );
 }

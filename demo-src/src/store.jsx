@@ -6,7 +6,7 @@ import { seedState, DRIVERS, OBJECTS, OVERTIME_RATE, ROLES } from './data.js';
 // Ничего не уходит на сервер. Кнопка «Сбросить демо» возвращает исходные данные.
 // ============================================================
 
-const KEY = 'ordius-demo-v1';
+const KEY = 'ordius-demo-v2';
 const Ctx = createContext(null);
 
 function load() {
@@ -14,7 +14,7 @@ function load() {
     const raw = window.localStorage.getItem(KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s && s.version === 1) return s;
+      if (s && s.version === 2) return s;
     }
   } catch (e) { /* приватный режим и т.п. — работаем без сохранения */ }
   return seedState();

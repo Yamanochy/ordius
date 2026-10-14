@@ -74,7 +74,7 @@ function buildShifts() {
 
 export function seedState() {
   return {
-    version: 1,
+    version: 2,
     units: UNITS.map(u => ({ ...u })),
     shifts: buildShifts(),
     advances: Object.entries(ADVANCES).map(([driverId, amount], i) => ({ id: 'a' + i, driverId, amount, date: '2026-10-05' })),
@@ -95,6 +95,14 @@ export function seedState() {
       { t: '13:20', who: 'Зуев П.', what: 'Подтвердил получение шины 315/80 R22.5' },
       { t: '10:40', who: 'Савельева Н.', what: 'Отметила оплату счёта № 418' },
       { t: '09:15', who: 'Петров И.', what: 'Согласовал закупку 28 400 ₽' }
+    ],
+    cards: [
+      { id: 'c1', unitId: 'u1', number: '7005 0300 1846 5671', provider: 'ТК «Сибнефтесервис»', pin: '4821', limit: '300 л в сутки', spent: 2310, status: 'active' },
+      { id: 'c2', unitId: 'u2', number: '7005 0300 1846 2209', provider: 'ТК «Сибнефтесервис»', pin: '7350', limit: '250 л в сутки', spent: 1640, status: 'active' },
+      { id: 'c3', unitId: 'u3', number: '7005 0300 1846 3318', provider: 'ТК «Сибнефтесервис»', pin: '1904', limit: '120 л в сутки', spent: 540, status: 'active' },
+      { id: 'c4', unitId: 'u4', number: '7005 0300 1846 0640', provider: 'ТК «Сибнефтесервис»', pin: '6612', limit: '150 л в сутки', spent: 980, status: 'active' },
+      { id: 'c5', unitId: 'u5', number: '7005 0300 1846 1127', provider: 'ТК «Сибнефтесервис»', pin: '3087', limit: '120 л в сутки', spent: 610, status: 'blocked' },
+      { id: 'c6', unitId: 'u6', number: '7005 0300 1846 0518', provider: 'ТК «Сибнефтесервис»', pin: '5543', limit: '300 л в сутки', spent: 2075, status: 'active' }
     ],
     nextId: 200
   };
