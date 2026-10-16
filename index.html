@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ordius — учёт смен, ремонтов и зарплаты водителей для автопарков и спецтехники</title>
+  <title>Ordius — порядок в парке, от смены до выплаты</title>
   <meta name="description" content="Водитель отмечает смену в телефоне, механик ведёт ремонт, бухгалтер видит, кому сколько выплатить. Табель, ремонты, топливные карты и маржа по объектам для владельцев спецтехники и грузовых автопарков." />
   <meta name="theme-color" content="#1C2129" />
   <link rel="canonical" href="https://ordius.ru/" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="ru_RU" />
-  <meta property="og:title" content="Ordius — смены, ремонты и зарплата водителей в одном месте" />
+  <meta property="og:title" content="Ordius — порядок в парке, от смены до выплаты" />
   <meta property="og:description" content="Учёт для владельцев спецтехники и грузовых автопарков. Откройте демо — без регистрации." />
   <meta property="og:image" content="https://ordius.ru/img/og.png" />
   <meta property="og:url" content="https://ordius.ru/" />
@@ -119,9 +119,9 @@
     .chain-foot b { color: var(--ink); font-weight: 600; }
 
     /* Feature rows */
-    .feat { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: center; padding: 56px 0; }
+    .feat { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 56px; align-items: center; padding: 56px 0; }
     .feat + .feat { border-top: 1px solid var(--line); }
-    .feat.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+    .feat.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); }
     .feat.flip .feat-copy { order: 2; }
     .feat-copy { display: flex; flex-direction: column; gap: 16px; }
     .feat-copy ul { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
@@ -129,8 +129,18 @@
     .feat-copy li::before { content: ""; position: absolute; left: 2px; top: 9px; width: 12px; height: 7px; border-left: 2px solid var(--signal); border-bottom: 2px solid var(--signal); transform: rotate(-45deg); }
     .frame { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-1); box-shadow: 0 1px 2px rgba(20,23,28,.05), 0 12px 32px rgba(20,23,28,.08); }
     .frame img { width: 100%; }
-    .frame.crop { aspect-ratio: 16 / 10; }
-    .frame.crop img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+    .zoom { position: relative; display: block; width: 100%; padding: 0; font: inherit; cursor: zoom-in; }
+    .zoom-hint { position: absolute; right: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: rgba(28,33,41,.88); color: #F3F4F6; font-size: 14px; font-weight: 500; line-height: 1; transition: background-color .15s; }
+    .zoom:hover .zoom-hint { background: var(--signal); }
+    .free { align-self: flex-start; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 12px; background: var(--success-soft); color: var(--success); font-family: var(--font-display); font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+    .free svg { flex: none; }
+    dialog.lb { border: 0; padding: 0; margin: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; background: rgba(14,17,21,.94); overflow: auto; }
+    dialog.lb::backdrop { background: transparent; }
+    .lb-inner { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 64px 24px 24px; box-sizing: border-box; }
+    .lb img { width: min(100%, 1240px); height: auto; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .lb-close { position: fixed; top: 14px; right: 14px; height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: #1C2129; color: #F3F4F6; font: 600 15px/1 var(--font-sans); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+    .lb-close:hover { border-color: rgba(255,255,255,.6); }
+    @media (max-width: 760px) { .lb-inner { justify-content: flex-start; align-items: flex-start; padding: 72px 16px 24px; } .lb img { width: 1100px; max-width: none; } .zoom-hint span { display: none; } }
 
     /* Roles */
     .roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 48px; border-top: 1px solid var(--line); }
@@ -307,7 +317,7 @@
               <li>Изменили ставку — прошлые смены не пересчитаются</li>
             </ul>
           </div>
-          <div class="frame crop"><img src="img/tabel.webp" width="2880" height="1760" loading="lazy" alt="Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены" /></div>
+          <button type="button" class="frame zoom" data-full="img/tabel.webp" aria-label="Увеличить: Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены"><img src="img/tabel.webp" width="2480" height="1520" loading="lazy" alt="Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
 
         <div class="feat flip">
@@ -320,7 +330,7 @@
               <li>Топливо — из чеков заправок</li>
             </ul>
           </div>
-          <div class="frame crop"><img src="img/objects.webp" width="2880" height="1760" loading="lazy" alt="Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке" /></div>
+          <button type="button" class="frame zoom" data-full="img/objects.webp" aria-label="Увеличить: Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке"><img src="img/objects.webp" width="2480" height="1520" loading="lazy" alt="Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
 
         <div class="feat">
@@ -333,7 +343,7 @@
               <li>Водитель видит свою карту в телефоне</li>
             </ul>
           </div>
-          <div class="frame crop"><img src="img/fleet.webp" width="2880" height="1760" loading="lazy" alt="Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта" /></div>
+          <button type="button" class="frame zoom" data-full="img/fleet.webp" aria-label="Увеличить: Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта"><img src="img/fleet.webp" width="2480" height="1520" loading="lazy" alt="Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
 
         <div class="feat flip">
@@ -346,7 +356,7 @@
               <li>Штрафы и ущерб удерживаются с указанием причины</li>
             </ul>
           </div>
-          <div class="frame crop"><img src="img/accounting.webp" width="2880" height="1760" loading="lazy" alt="Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков" /></div>
+          <button type="button" class="frame zoom" data-full="img/accounting.webp" aria-label="Увеличить: Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков"><img src="img/accounting.webp" width="2480" height="1520" loading="lazy" alt="Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
       </div>
     </section>
@@ -402,7 +412,7 @@
           <div class="plan">
             <div class="plan-name"><h3>Старт</h3></div>
             <div class="price">4 900 ₽<small> в месяц</small></div>
-            <span class="badge b-ok">Первый месяц бесплатно</span>
+            <p class="free"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>Первый месяц бесплатно</p>
             <p class="plan-for">До 10 единиц техники. Для владельца, который сам себе диспетчер.</p>
             <ul>
               <li>Табель со смартфона водителя и фото документов</li>
@@ -417,7 +427,7 @@
           <div class="plan pro">
             <div class="plan-name"><h3>Бизнес</h3><span class="badge b-info">12 дополнительных разделов</span></div>
             <div class="price">11 900 ₽<small> в месяц</small></div>
-            <span class="badge b-ok">Первый месяц бесплатно</span>
+            <p class="free"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>Первый месяц бесплатно</p>
             <p class="plan-for">До 40 единиц техники. Больше — посчитаем под ваш парк.</p>
             <ul>
               <li>Всё из тарифа «Старт»</li>
@@ -466,9 +476,14 @@
   <footer>
     <div class="wrap">
       <img src="brand/ordius-lockup-on-dark.svg" alt="Ordius" width="111" height="20" />
-      <span>© 2026 Ordius. Учёт смен, техники и зарплаты водителей.</span>
+      <span>Ordius — порядок в парке, от смены до выплаты. © 2026</span>
     </div>
   </footer>
+
+  <dialog class="lb" id="lb" aria-label="Скриншот Ordius">
+    <button type="button" class="lb-close" id="lb-close">Закрыть<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="lb-inner"><img id="lb-img" alt="" /></div>
+  </dialog>
 
   <script>
     // Контакт для кнопок связи. Если оставить пустым, кнопки скроются.
@@ -478,6 +493,15 @@
       document.body.classList.remove('no-contact');
       document.querySelectorAll('[data-contact]').forEach(function (a) { a.href = CONTACT; a.target = '_blank'; a.rel = 'noopener'; });
     }
+    var lb = document.getElementById('lb'), lbImg = document.getElementById('lb-img');
+    document.querySelectorAll('.zoom').forEach(function (b) {
+      b.addEventListener('click', function () {
+        lbImg.src = b.dataset.full; lbImg.alt = b.querySelector('img').alt;
+        if (lb.showModal) { lb.showModal(); } else { window.open(b.dataset.full, '_blank'); }
+      });
+    });
+    document.getElementById('lb-close').addEventListener('click', function () { lb.close(); });
+    lb.addEventListener('click', function (e) { if (e.target === lb || e.target.classList.contains('lb-inner')) lb.close(); });
     var chain = document.getElementById('chain');
     var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (still || !('IntersectionObserver' in window)) { chain.classList.add('run'); }
