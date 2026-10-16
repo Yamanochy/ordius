@@ -15,8 +15,7 @@
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
     --surface-0: #0E1115; --surface-1: #161A20; --surface-2: #1E232A;
     --line: #2B313A; --line-strong: #6B7482;
     --ink: #ECEEF2; --ink-muted: #A7AEBA; --ink-subtle: #8D95A2;
@@ -27,8 +26,7 @@
     --danger: #F2766A; --danger-soft: #3A1B18;
     --shadow-1: 0 1px 2px rgba(0,0,0,0.5); --shadow-2: 0 12px 32px rgba(0,0,0,0.6);
     color-scheme: dark;
-  }
-}
+  } }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -194,7 +192,7 @@ table.t tfoot td { font-weight: 600; border-top: 1px solid var(--line-strong); }
 /* ---------- Помощник Ordius ---------- */
 .as-fab { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; height: 52px; padding: 0 20px 0 16px; border-radius: 999px; border: 0; background: var(--graphite); color: var(--on-graphite); font: 600 15px/1 var(--font-sans, inherit); cursor: pointer; box-shadow: 0 10px 28px rgba(20,23,28,.28); }
 .as-fab svg { color: var(--signal); }
-@media (prefers-color-scheme: dark) { .as-fab { background: var(--signal); color: var(--on-signal); } .as-fab svg { color: currentColor; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .as-fab { background: var(--signal); color: var(--on-signal); } :root:not([data-theme="light"]) .as-fab svg { color: currentColor; } }
 .as-fab:hover { filter: brightness(1.12); }
 .as-fab:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
 .as-panel { position: fixed; right: 20px; bottom: 20px; z-index: 45; width: 400px; max-width: calc(100vw - 32px); height: min(680px, calc(100vh - 40px)); display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow-2); overflow: hidden; }
@@ -244,3 +242,27 @@ table.t tfoot td { font-weight: 600; border-top: 1px solid var(--line-strong); }
 .as-inline { width: 44px; height: 44px; flex: none; border-radius: 12px; border: 1px solid var(--line); background: var(--signal-soft); color: var(--signal-text); display: grid; place-items: center; cursor: pointer; margin-left: auto; }
 .as-inline:hover { border-color: var(--signal); }
 .as-inline:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* Тема, выбранная вручную */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+    --surface-0: #0E1115; --surface-1: #161A20; --surface-2: #1E232A;
+    --line: #2B313A; --line-strong: #6B7482;
+    --ink: #ECEEF2; --ink-muted: #A7AEBA; --ink-subtle: #8D95A2;
+    --graphite: #262C35; --on-graphite: #ECEEF2;
+    --signal: #5B8CFF; --signal-text: #86A9FF; --on-signal: #0A1022; --signal-soft: #18244A;
+    --success: #43C281; --success-soft: #132B20;
+    --warning: #E9A93F; --warning-soft: #2E2412;
+    --danger: #F2766A; --danger-soft: #3A1B18;
+    --shadow-1: 0 1px 2px rgba(0,0,0,0.5); --shadow-2: 0 12px 32px rgba(0,0,0,0.6);
+    color-scheme: dark;
+  }
+:root[data-theme="dark"] .as-fab { background: var(--signal); color: var(--on-signal); }
+:root[data-theme="dark"] .as-fab svg { color: currentColor; }
+.theme-btn { width: 40px; height: 40px; flex: none; border-radius: 10px; border: 1px solid rgba(243,244,246,.22); background: transparent; color: var(--on-graphite); display: grid; place-items: center; cursor: pointer; margin-left: -12px; }
+.theme-btn:hover { border-color: rgba(243,244,246,.55); }
+.theme-btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+@media (max-width: 760px) {
+  .app-header-in .nav, .app-header-in .who { order: 2; }
+  .app-header-in .theme-btn { order: 1; margin-left: auto; }
+}

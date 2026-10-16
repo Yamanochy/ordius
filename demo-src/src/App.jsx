@@ -58,6 +58,34 @@ const ROLE_SCREENS = {
   customer: ['customer']
 };
 
+function systemDark() { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
+function currentTheme() { return document.documentElement.getAttribute('data-theme') || (systemDark() ? 'dark' : 'light'); }
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState(currentTheme);
+  useEffect(() => {
+    const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    const on = () => setTheme(currentTheme());
+    if (mq && mq.addEventListener) mq.addEventListener('change', on);
+    return () => { if (mq && mq.removeEventListener) mq.removeEventListener('change', on); };
+  }, []);
+  const dark = theme === 'dark';
+  const flip = () => {
+    const n = dark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', n);
+    try { window.localStorage.setItem('ordius-theme', n); } catch (e) { /* без сохранения */ }
+    setTheme(n);
+  };
+  const label = dark ? 'Включить светлую тему' : 'Включить тёмную тему';
+  return (
+    <button type="button" className="theme-btn" onClick={flip} aria-label={label} title={label}>
+      {dark
+        ? <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+        : <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" /></svg>}
+    </button>
+  );
+}
+
 function getPlan() { try { return window.localStorage.getItem('ordius-plan') || 'business'; } catch (e) { return 'business'; } }
 function allowed(role, plan) { return ROLE_SCREENS[role].filter(s => plan === 'business' || !SCREENS[s].biz); }
 
@@ -125,6 +153,7 @@ export default function App() {
             ))}
           </nav>
           <span className="who">ООО «СибСпецТранс» · {person.label}: {person.person}</span>
+          <ThemeToggle />
         </div>
         {biz.length > 0 && (
           <div className="biz-strip">
