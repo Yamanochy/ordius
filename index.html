@@ -212,6 +212,10 @@
     footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: center; justify-content: space-between; padding-top: 28px; padding-bottom: 28px; }
     footer img { height: 20px; width: auto; }
 
+    [data-theme-img="dark"] { display: none !important; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) [data-theme-img="dark"] { display: block !important; } :root:not([data-theme="light"]) [data-theme-img="light"] { display: none !important; } }
+    :root[data-theme="dark"] [data-theme-img="dark"] { display: block !important; }
+    :root[data-theme="dark"] [data-theme-img="light"] { display: none !important; }
     .no-contact [data-contact] { display: none !important; }
 
     @media (max-width: 1120px) { .top nav { display: none; } .theme-btn { margin-left: auto; } }
@@ -289,9 +293,9 @@
         <div class="shot-stage">
           <div class="browser">
             <div class="browser-bar" aria-hidden="true"><i></i><i></i><i></i><span>ordius.ru</span></div>
-            <img src="img/overview.webp" width="2880" height="1760" alt="Панель владельца в Ordius: фонд зарплаты 338 200 ₽, к выплате 98 200 ₽, маржа по объектам 152 800 ₽, смены по дням" />
+            <img data-theme-img="light" src="img/overview.webp" width="2880" height="1760" alt="Панель владельца в Ordius: фонд зарплаты 338 200 ₽, к выплате 98 200 ₽, маржа по объектам 152 800 ₽, смены по дням" /><img loading="lazy" data-theme-img="dark" src="img/overview-dark.webp" width="2880" height="1760" alt="Панель владельца в Ordius: фонд зарплаты 338 200 ₽, к выплате 98 200 ₽, маржа по объектам 152 800 ₽, смены по дням" />
           </div>
-          <img class="phone-shot" src="img/driver.webp" width="780" height="1688" alt="Телефон водителя: заработано в октябре 54 000 ₽, аванс 40 000 ₽, осталось к выплате 14 000 ₽" />
+          <img data-theme-img="light" class="phone-shot" src="img/driver.webp" width="780" height="1688" alt="Телефон водителя: заработано в октябре 54 000 ₽, аванс 40 000 ₽, осталось к выплате 14 000 ₽" /><img loading="lazy" data-theme-img="dark" class="phone-shot" src="img/driver-dark.webp" width="780" height="1688" alt="Телефон водителя: заработано в октябре 54 000 ₽, аванс 40 000 ₽, осталось к выплате 14 000 ₽" />
         </div>
       </div>
     </section>
@@ -349,7 +353,7 @@
               <li>Изменили ставку — прошлые смены не пересчитаются</li>
             </ul>
           </div>
-          <button type="button" class="frame zoom" data-full="img/tabel.webp" aria-label="Увеличить: Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены"><img src="img/tabel.webp" width="2480" height="1520" loading="lazy" alt="Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
+          <button type="button" class="frame zoom" data-full="img/tabel.webp" data-full-dark="img/tabel-dark.webp" aria-label="Увеличить: Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены"><img data-theme-img="light" src="img/tabel.webp" width="2480" height="1520" loading="lazy" alt="Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены" /><img data-theme-img="dark" src="img/tabel-dark.webp" width="2480" height="1520" loading="lazy" alt="Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
 
         <div class="feat flip">
@@ -362,7 +366,7 @@
               <li>Топливо — из чеков заправок</li>
             </ul>
           </div>
-          <button type="button" class="frame zoom" data-full="img/objects.webp" aria-label="Увеличить: Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке"><img src="img/objects.webp" width="2480" height="1520" loading="lazy" alt="Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
+          <button type="button" class="frame zoom" data-full="img/objects.webp" data-full-dark="img/objects-dark.webp" aria-label="Увеличить: Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке"><img data-theme-img="light" src="img/objects.webp" width="2480" height="1520" loading="lazy" alt="Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке" /><img data-theme-img="dark" src="img/objects-dark.webp" width="2480" height="1520" loading="lazy" alt="Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
 
         <div class="feat">
@@ -375,7 +379,7 @@
               <li>Водитель видит свою карту в телефоне</li>
             </ul>
           </div>
-          <button type="button" class="frame zoom" data-full="img/fleet.webp" aria-label="Увеличить: Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта"><img src="img/fleet.webp" width="2480" height="1520" loading="lazy" alt="Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
+          <button type="button" class="frame zoom" data-full="img/fleet.webp" data-full-dark="img/fleet-dark.webp" aria-label="Увеличить: Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта"><img data-theme-img="light" src="img/fleet.webp" width="2480" height="1520" loading="lazy" alt="Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта" /><img data-theme-img="dark" src="img/fleet-dark.webp" width="2480" height="1520" loading="lazy" alt="Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
 
         <div class="feat flip">
@@ -388,7 +392,7 @@
               <li>Штрафы и ущерб удерживаются с указанием причины</li>
             </ul>
           </div>
-          <button type="button" class="frame zoom" data-full="img/accounting.webp" aria-label="Увеличить: Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков"><img src="img/accounting.webp" width="2480" height="1520" loading="lazy" alt="Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
+          <button type="button" class="frame zoom" data-full="img/accounting.webp" data-full-dark="img/accounting-dark.webp" aria-label="Увеличить: Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков"><img data-theme-img="light" src="img/accounting.webp" width="2480" height="1520" loading="lazy" alt="Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков" /><img data-theme-img="dark" src="img/accounting-dark.webp" width="2480" height="1520" loading="lazy" alt="Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков" /><span class="zoom-hint"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg><span>Увеличить</span></span></button>
         </div>
       </div>
     </section>
@@ -576,7 +580,7 @@
     var lb = document.getElementById('lb'), lbImg = document.getElementById('lb-img');
     document.querySelectorAll('.zoom').forEach(function (b) {
       b.addEventListener('click', function () {
-        lbImg.src = b.dataset.full; lbImg.alt = b.querySelector('img').alt;
+        lbImg.src = (document.documentElement.classList.contains('is-dark') && b.dataset.fullDark) ? b.dataset.fullDark : b.dataset.full; lbImg.alt = b.querySelector('img').alt;
         if (lb.showModal) { lb.showModal(); } else { window.open(b.dataset.full, '_blank'); }
       });
     });
