@@ -15,7 +15,7 @@ export default function DriverApp() {
   const me = DRIVERS.find(d => d.id === ME);
   const p = payroll(state).find(x => x.driver.id === ME);
   const shifts = state.shifts.filter(s => s.driverId === ME).sort((a, b) => b.date.localeCompare(a.date));
-  const myTasks = state.tasks.filter(t => t.toRole === 'driver' && t.status !== 'accepted');
+  const myTasks = state.tasks.filter(t => t.toRole === 'driver' && (!t.driverId || t.driverId === ME) && t.status !== 'accepted');
   const myReports = state.tasks.filter(t => t.from.startsWith('Ковалёв') && t.parentId === null);
   const advPct = p.earned ? Math.min(100, Math.round(p.advance / p.earned * 100)) : 0;
 
@@ -93,6 +93,7 @@ export default function DriverApp() {
             <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <Row k="Начислено за подтверждённые смены" v={fmt(p.earned)} />
               <Row k="Аванс 5 октября" v={'− ' + fmt(p.advance)} />
+              {p.held > 0 && <Row k="Удержано (штрафы)" v={'− ' + fmt(p.held)} />}
               <Row k={p.paid ? 'Выплачено' : 'Осталось к выплате'} v={fmt(p.left)} bold />
               <span>{p.paid ? <Badge tone="success">Выплачено бухгалтером</Badge> : <Badge tone="warning">Ожидает выплаты</Badge>}</span>
             </div>

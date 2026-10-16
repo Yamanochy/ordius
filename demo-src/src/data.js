@@ -3,6 +3,8 @@
 // Все люди, номера и суммы придуманы. Дата демо — 14 октября 2026.
 // ============================================================
 
+import { bizSeed } from './bizdata.js';
+
 export const DEMO_TODAY = '2026-10-14';
 export const DAYS = Array.from({ length: 14 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
 export const OVERTIME_RATE = 750; // ₽ за каждый час сверх 12
@@ -13,7 +15,8 @@ export const ROLES = [
   { id: 'mechanic', label: 'Механик', person: 'Павел Зуев' },
   { id: 'supply', label: 'Снабжение', person: 'Евгений Котов' },
   { id: 'accountant', label: 'Бухгалтер', person: 'Наталья Савельева' },
-  { id: 'driver', label: 'Водитель', person: 'Дмитрий Ковалёв' }
+  { id: 'driver', label: 'Водитель', person: 'Дмитрий Ковалёв' },
+  { id: 'customer', label: 'Заказчик', person: 'Анна Лебедева', business: true }
 ];
 
 export const OBJECTS = [
@@ -74,7 +77,7 @@ function buildShifts() {
 
 export function seedState() {
   return {
-    version: 2,
+    version: 3,
     units: UNITS.map(u => ({ ...u })),
     shifts: buildShifts(),
     advances: Object.entries(ADVANCES).map(([driverId, amount], i) => ({ id: 'a' + i, driverId, amount, date: '2026-10-05' })),
@@ -104,6 +107,7 @@ export function seedState() {
       { id: 'c5', unitId: 'u5', number: '7005 0300 1846 1127', provider: 'ТК «Сибнефтесервис»', pin: '3087', limit: '120 л в сутки', spent: 610, status: 'blocked' },
       { id: 'c6', unitId: 'u6', number: '7005 0300 1846 0518', provider: 'ТК «Сибнефтесервис»', pin: '5543', limit: '300 л в сутки', spent: 2075, status: 'active' }
     ],
+    ...bizSeed(),
     nextId: 200
   };
 }

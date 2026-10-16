@@ -180,3 +180,13 @@ table.t tfoot td { font-weight: 600; border-top: 1px solid var(--line-strong); }
 .chart div { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; gap: 2px; }
 .progress { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .progress i { display: block; height: 100%; }
+
+/* ===== Полоса разделов «Бизнес» ===== */
+.biz-strip { border-top: 1px solid rgba(255,255,255,.08); background: rgba(0,0,0,.18); }
+.biz-strip-in { max-width: 1240px; margin: 0 auto; padding: 6px 20px; display: flex; gap: 4px; align-items: center; overflow-x: auto; scrollbar-width: none; }
+.biz-strip-in::-webkit-scrollbar { display: none; }
+.biz-tag { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #fff; background: var(--signal); border-radius: 6px; padding: 3px 8px; margin-right: 8px; flex: none; }
+.biz-strip button { background: transparent; border: 0; color: var(--graphite-muted); font-size: 14px; font-weight: 500; padding: 6px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.biz-strip button:hover { color: var(--on-graphite); }
+.biz-strip button.on { color: var(--on-graphite); font-weight: 600; background: rgba(255,255,255,.10); }
+.biz-strip button.locked { opacity: .55; }

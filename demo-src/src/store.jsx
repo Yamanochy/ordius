@@ -6,7 +6,7 @@ import { seedState, DRIVERS, OBJECTS, OVERTIME_RATE, ROLES } from './data.js';
 // Ничего не уходит на сервер. Кнопка «Сбросить демо» возвращает исходные данные.
 // ============================================================
 
-const KEY = 'ordius-demo-v2';
+const KEY = 'ordius-demo-v3';
 const Ctx = createContext(null);
 
 function load() {
@@ -14,7 +14,7 @@ function load() {
     const raw = window.localStorage.getItem(KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s && s.version === 2) return s;
+      if (s && s.version === 3) return s;
     }
   } catch (e) { /* приватный режим и т.п. — работаем без сохранения */ }
   return seedState();
@@ -74,10 +74,11 @@ export function payroll(state) {
     const pending = own.filter(s => s.status === 'pending');
     const earned = confirmed.reduce((a, s) => a + shiftPay(s), 0);
     const advance = state.advances.filter(a => a.driverId === d.id).reduce((a, x) => a + x.amount, 0);
+    const held = (state.deductions || []).filter(x => x.driverId === d.id).reduce((a, x) => a + x.amount, 0);
     return {
       driver: d, shifts: confirmed.length, pendingCount: pending.length,
       hours: confirmed.reduce((a, s) => a + s.hours, 0),
-      earned, advance, left: earned - advance, paid: !!state.paid[d.id]
+      earned, advance, held, left: earned - advance - held, paid: !!state.paid[d.id]
     };
   });
 }
@@ -205,4 +206,16 @@ export function fmt(n) {
   const v = Math.round(Number(n));
   const s = Math.abs(v).toLocaleString('ru-RU');
   return (v < 0 ? '−' : '') + s + ' ₽';
+}
+
+// ---------- общие помощники для разделов «Бизнес» ----------
+
+const SHORT = { owner: 'Петров И.', dispatcher: 'Орлова Т.', mechanic: 'Зуев П.', supply: 'Котов Е.', accountant: 'Савельева Н.', driver: 'Ковалёв Д.', customer: 'Лебедева А. (заказчик)' };
+export function whoShort(role) { return SHORT[role] || role; }
+
+export function addLog(s, role, what) { s.log.unshift({ t: nowLabel().slice(6), who: whoShort(role), what }); }
+
+// Простая задача кому-то: попадает во входящие роли, у водителя — на телефон
+export function addTask(s, { title, toRole, from, unitId, note, driverId }) {
+  s.tasks.unshift({ id: 't' + (s.nextId++), chain: 100 + s.nextId, parentId: null, kind: 'general', title, unitId: unitId || 'u1', from, toRole, driverId: driverId || null, status: 'todo', created: nowLabel(), note: note || '', history: [nowLabel() + ' · создано'] });
 }

@@ -34,11 +34,12 @@ export default function Accounting({ role }) {
           { key: 'shifts', label: 'Смен', right: true },
           { key: 'earned', label: 'Начислено', money: true },
           { key: 'advance', label: 'Аванс', money: true },
+          { key: 'held', label: 'Удержано', money: true },
           { key: 'left', label: 'К выплате', money: true },
           { key: 'act', label: '', render: (v, r) => r.paid ? <Badge tone="success">Выплачено</Badge> : r.left <= 0 ? <Badge tone="danger">Долг {fmt(-r.left)}</Badge> : can ? <Button size="sm" variant="primary" onClick={() => payDriver(r.p)}>Выплатить</Button> : <Badge tone="warning">Не выплачено</Badge> }
         ]}
-        rows={pay.map(p => ({ id: p.driver.id, name: p.driver.name, shifts: p.shifts, earned: p.earned, advance: p.advance, left: p.left, paid: p.paid, p }))}
-        total={{ earned: pay.reduce((a, p) => a + p.earned, 0), advance: pay.reduce((a, p) => a + p.advance, 0), left: pay.reduce((a, p) => a + p.left, 0) }}
+        rows={pay.map(p => ({ id: p.driver.id, name: p.driver.name, shifts: p.shifts, earned: p.earned, advance: p.advance, held: p.held, left: p.left, paid: p.paid, p }))}
+        total={{ earned: pay.reduce((a, p) => a + p.earned, 0), advance: pay.reduce((a, p) => a + p.advance, 0), held: pay.reduce((a, p) => a + p.held, 0), left: pay.reduce((a, p) => a + p.left, 0) }}
       />
 
       <Table
