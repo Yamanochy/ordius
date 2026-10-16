@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AssistantButton } from '../Assistant.jsx';
 import { useStore, inboxFor, taskActions, STATUS } from '../store.jsx';
 import { Logo, Badge, Icon } from '../ui.jsx';
 import { ChainView } from './Tasks.jsx';
@@ -36,6 +37,7 @@ export default function MechanicApp() {
           <span className="subtle" style={{ fontSize: 12 }}>Механик · база Новосибирск</span>
           <b style={{ fontSize: 16, fontWeight: 600 }}>Павел Зуев</b>
         </span>
+        <AssistantButton />
       </div>
       <div className="ph-body">
         <h2 className="h2">Мои заявки</h2>

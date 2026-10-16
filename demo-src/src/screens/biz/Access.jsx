@@ -15,11 +15,11 @@ const S = {
 };
 
 export default function Access() {
-  const { state } = useStore();
+  const { state, setToast } = useStore();
   return (
     <>
       <PageHead eyebrow="Кто что видит и меняет. Каждое действие записывается." title="Права доступа и журнал">
-        <Button onClick={() => window.alert('В рабочей версии — выгрузка начислений, авансов и расходов в формате для 1С.')}>Выгрузка для 1С</Button>
+        <Button onClick={() => setToast('В рабочей версии — выгрузка начислений, авансов и расходов в формате для 1С.')}>Выгрузка для 1С</Button>
       </PageHead>
       <section className="card" style={{ overflowX: 'auto' }}>
         <div style={{ minWidth: 980 }}>

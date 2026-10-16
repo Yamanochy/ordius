@@ -22,6 +22,7 @@ import Staff from './screens/biz/Staff.jsx';
 import Release from './screens/biz/Release.jsx';
 import Fines from './screens/biz/Fines.jsx';
 import Access from './screens/biz/Access.jsx';
+import Assistant from './Assistant.jsx';
 
 const SCREENS = {
   overview: { label: 'Обзор', C: Overview },
@@ -144,6 +145,7 @@ export default function App() {
         ? <div className="phone-stage"><div className="phone"><Screen role={role} go={go} /></div></div>
         : <main className="page"><Screen role={role} go={go} /></main>}
 
+      <Assistant role={role} go={go} phone={!!SCREENS[screen].phone} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </>
   );

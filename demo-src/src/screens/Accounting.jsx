@@ -5,7 +5,7 @@ import { PageHead, Stat, Table, Badge, Button } from '../ui.jsx';
 const BILL_ST = { paid: ['Оплачено', 'success'], topay: ['К оплате', 'warning'], refund: ['К возмещению', 'info'] };
 
 export default function Accounting({ role }) {
-  const { state, update } = useStore();
+  const { state, update, setToast } = useStore();
   const pay = payroll(state);
   const can = role === 'accountant' || role === 'owner';
   const who = role === 'owner' ? 'Петров И.' : 'Савельева Н.';
@@ -19,7 +19,7 @@ export default function Accounting({ role }) {
   return (
     <>
       <PageHead eyebrow="Всё, что нужно оплатить, возместить и выгрузить" title="Бухгалтерия · октябрь 2026">
-        <Button onClick={() => window.alert('В рабочей версии здесь скачивается оформленная ведомость в Excel.')}>Ведомость (Excel)</Button>
+        <Button onClick={() => setToast('В рабочей версии здесь скачивается оформленная ведомость в Excel.')}>Ведомость (Excel)</Button>
       </PageHead>
       <div className="grid-kpi">
         <Stat label="Зарплата к выплате" value={fmt(salaryLeft)} hint="после авансов" />

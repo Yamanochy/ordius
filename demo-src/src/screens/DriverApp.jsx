@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AssistantButton } from '../Assistant.jsx';
 import { useStore, payroll, shiftPay, fmt, nowLabel, STATUS, taskActions } from '../store.jsx';
 import { DAYS, DRIVERS, OBJECTS } from '../data.js';
 import { Logo, Button, Badge, Modal, Field, Icon } from '../ui.jsx';
@@ -27,6 +28,7 @@ export default function DriverApp() {
           <span className="subtle" style={{ fontSize: 12 }}>ООО «СибСпецТранс»</span>
           <b style={{ fontSize: 16, fontWeight: 600 }}>{me.name}</b>
         </span>
+        <AssistantButton />
       </div>
 
       <div className="ph-body">

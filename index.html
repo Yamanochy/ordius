@@ -67,7 +67,7 @@
     .top { position: sticky; top: 0; z-index: 10; background: var(--graphite); border-bottom: 1px solid rgba(255,255,255,.06); }
     .top .wrap { display: flex; align-items: center; gap: 32px; height: 68px; }
     .top nav { display: flex; gap: 4px; margin-left: auto; }
-    .top nav a { color: var(--on-graphite-muted); text-decoration: none; font-size: 15px; font-weight: 500; padding: 8px 12px; border-radius: 8px; }
+    .top nav a { white-space: nowrap; color: var(--on-graphite-muted); text-decoration: none; font-size: 15px; font-weight: 500; padding: 8px 12px; border-radius: 8px; }
     .top nav a:hover { color: var(--on-graphite); background: var(--graphite-2); }
     .brand { display: flex; }
     .brand img { height: 26px; width: auto; }
@@ -142,6 +142,21 @@
     .lb-close:hover { border-color: rgba(255,255,255,.6); }
     @media (max-width: 760px) { .lb-inner { justify-content: flex-start; align-items: flex-start; padding: 72px 16px 24px; } .lb img { width: 1100px; max-width: none; } .zoom-hint span { display: none; } }
 
+    /* Assistant */
+    .ai-sec { background: var(--surface-1); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .ai-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .ai-case { display: flex; flex-direction: column; gap: 12px; }
+    .ai-who { font-weight: 600; font-size: 15px; color: var(--ink-muted); display: flex; align-items: center; gap: 8px; }
+    .ai-chat { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 18px; background: var(--surface-0); border: 1px solid var(--line); }
+    .bub { max-width: 90%; padding: 10px 14px; border-radius: 16px; font-size: 15px; line-height: 22px; }
+    .bub.me { align-self: flex-end; background: var(--signal); color: #fff; border-top-right-radius: 6px; }
+    .bub.bot { align-self: flex-start; background: var(--surface-1); border: 1px solid var(--line); border-top-left-radius: 6px; }
+    .bub.voice { display: inline-flex; gap: 8px; align-items: flex-start; }
+    .bub.voice svg { flex: none; margin-top: 3px; }
+    .bub .ok { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--success-soft); color: var(--success); font-size: 14px; font-weight: 600; }
+    .ai-rules { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 16px 40px; color: var(--ink-muted); font-size: 16px; }
+    .ai-rules b { color: var(--ink); font-weight: 600; }
+
     /* Roles */
     .roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 48px; border-top: 1px solid var(--line); }
     .role { padding: 22px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
@@ -194,12 +209,14 @@
 
     .no-contact [data-contact] { display: none !important; }
 
+    @media (max-width: 1120px) { .top nav { display: none; } .top .wrap { justify-content: space-between; } }
     @media (max-width: 1040px) {
       .chain { grid-template-columns: 1fr; gap: 28px; }
       .step { padding: 0 0 0 28px; }
       .step::before { position: absolute; left: 0; top: 4px; bottom: -24px; width: 6px; height: auto; margin: 0; }
       .step:last-child::before { bottom: 0; }
       .biz-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .ai-grid { grid-template-columns: 1fr; max-width: 560px; }
       .feat { grid-template-columns: 1fr; gap: 32px; }
       .feat.flip .feat-copy { order: 0; }
     }
@@ -234,6 +251,7 @@
       <nav aria-label="Разделы">
         <a href="#how">Как работает</a>
         <a href="#features">Возможности</a>
+        <a href="#assistant">Помощник</a>
         <a href="#business">Для крупных парков</a>
         <a href="#pricing">Тарифы</a>
         <a href="#faq">Вопросы</a>
@@ -361,7 +379,44 @@
       </div>
     </section>
 
-    <section aria-labelledby="roles-title" style="padding-top: 0">
+    <section class="ai-sec" id="assistant" aria-labelledby="ai-title">
+      <div class="wrap">
+        <div class="head">
+          <h2 id="ai-title">Помощник, который знает ваш парк</h2>
+          <p class="lead">У каждого сотрудника в Ordius есть помощник. Он отвечает на вопросы, показывает цифры из системы и вносит данные — голосом или текстом. Водителю не нужно разбираться в программе, бухгалтеру — помнить, где какая кнопка.</p>
+        </div>
+        <div class="ai-grid">
+          <div class="ai-case">
+            <span class="ai-who">Водитель, голосом из кабины</span>
+            <div class="ai-chat">
+              <div class="bub me voice"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Отметь смену двенадцатое октября, двенадцать часов, Карьер Восточный</span></div>
+              <div class="bub bot">Смена за 12 октября, 12 ч, Карьер Восточный, Shacman О 512 КХ. Фото путевого прикрепил.<br /><span class="ok"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Отправлено диспетчеру</span></div>
+            </div>
+          </div>
+          <div class="ai-case">
+            <span class="ai-who">Бухгалтер</span>
+            <div class="ai-chat">
+              <div class="bub me">Сколько осталось выплатить водителям?</div>
+              <div class="bub bot">Не выплачено 6 водителям на 98&nbsp;200&nbsp;₽. Больше всех — Гришину Олегу, 26&nbsp;500&nbsp;₽. Ведомость для 1С — в разделе «Бухгалтерия».</div>
+            </div>
+          </div>
+          <div class="ai-case">
+            <span class="ai-who">Владелец</span>
+            <div class="ai-chat">
+              <div class="bub me">Заблокируй топливную карту КамАЗа</div>
+              <div class="bub bot">Карта •••• 2209, КамАЗ Е 207 НТ. Заблокировать?<br /><span class="ok"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Заблокирована, запись в журнале</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="ai-rules">
+          <span><b>Ничего не меняет сам</b> — только после вашей кнопки «Подтвердить»</span>
+          <span><b>Видит то же, что и вы</b> — водитель не узнает чужую зарплату</span>
+          <span><b>Попробуйте в демо</b> — кнопка «Помощник» на любом экране</span>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="roles-title">
       <div class="wrap">
         <div class="head">
           <h2 id="roles-title">Каждый видит своё</h2>
@@ -420,6 +475,7 @@
               <li>Ремонты цепочкой: водитель, механик, снабжение</li>
               <li>Деньги по объектам</li>
               <li>Техника, ТО, топливные карты</li>
+              <li>Помощник Ordius для каждой роли, с голосовым вводом</li>
               <li>Все 7 ролей, без ограничения пользователей</li>
             </ul>
             <a class="btn btn-ghost" href="demo/#owner/overview">Посмотреть в демо</a>
@@ -456,6 +512,7 @@
           <details><summary>Как платим водителям — по часам, а у нас рейсы и тонны</summary><p>Ставки бывают за час, смену, рейс и тонно-километр, их можно сочетать с окладом и коэффициентами за ночь, праздники и переработку. Ставку можно привязать к водителю, машине или объекту.</p></details>
           <details><summary>Сколько времени займёт запуск?</summary><p>Обычно один-два рабочих дня. Присылаете табель и список техники в любом виде, мы переносим их сами. Водителям отправляем ссылку и код компании.</p></details>
           <details><summary>Что если водитель работает в двух компаниях?</summary><p>Один вход на обе. Смены и заработок у каждой компании свои и друг другу не видны.</p></details>
+          <details><summary>Помощник может ошибиться в данных?</summary><p>Помощник не считает зарплату сам и не придумывает цифры — он берёт их из Ordius. Любое изменение он сначала показывает карточкой, и в систему оно попадает только после вашей кнопки «Подтвердить».</p></details>
           <details><summary>Можно ли выгрузить данные для бухгалтерии?</summary><p>Да, табель и расчёт зарплаты выгружаются в Excel. Из него бухгалтер переносит данные в 1С.</p></details>
         </div>
       </div>

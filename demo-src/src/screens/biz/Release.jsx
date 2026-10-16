@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AssistantButton } from '../../Assistant.jsx';
 import { useStore, addLog, nowLabel } from '../../store.jsx';
 import { DRIVERS } from '../../data.js';
 import { Logo, Button, Badge, Field } from '../../ui.jsx';
@@ -27,6 +28,7 @@ export default function Release() {
       <div className="ph-top" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="row" style={{ gap: 10 }}><Logo variant="mark" size={32} /><span style={{ display: 'flex', flexDirection: 'column' }}><span className="subtle" style={{ fontSize: 12 }}>Выпуск на линию · 16 октября</span><b style={{ fontSize: 16 }}>Механик Зуев П.</b></span></span>
+          <AssistantButton />
         </div>
         <Field label="Машина" id="rel-u">
           <select id="rel-u" value={unitId} onChange={e => { setUnitId(e.target.value); setDone({}); setRemark(''); }}>
