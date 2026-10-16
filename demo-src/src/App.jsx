@@ -114,7 +114,7 @@ export default function App() {
 
       <header className="app-header">
         <div className="app-header-in">
-          <Logo size={30} onDark />
+          <Logo size={24} onDark />
           <nav className="nav" aria-label="Разделы">
             {core.map(id => (
               <button key={id} type="button" className={id === screen ? 'on' : ''} onClick={() => go(role, id)}>

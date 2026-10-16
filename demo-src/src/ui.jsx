@@ -1,45 +1,23 @@
 import React from 'react';
 import { fmt } from './store.jsx';
 
-// Логотип: сквиркл с кольцом и синей «стрелкой» + надпись ORDIUS
-const SQ = (() => {
-  const pts = [];
-  for (let i = 0; i < 120; i++) {
-    const th = 2 * Math.PI * i / 120, c = Math.cos(th), s = Math.sin(th);
-    pts.push((32 + 32 * Math.sign(c) * Math.pow(Math.abs(c), 0.4)).toFixed(2) + ',' + (32 + 32 * Math.sign(s) * Math.pow(Math.abs(s), 0.4)).toFixed(2));
-  }
-  return 'M' + pts.join(' L') + ' Z';
-})();
+import { WB, WU, MB, MU } from './logoPaths.js';
 
-const WORD = [
-  ['translate(0 0)', 'M18,3.25 A14.75,16.75 0 1 0 18.001,3.25'],
-  ['translate(47 0)', 'M3.25,36.75 V3.25 H13.85 A8.9,8.9 0 0 1 13.85,21.05 H3.25 M12.35,21.05 L24.75,36.75'],
-  ['translate(86 0)', 'M3.25,3.25 V36.75 H12 A16.75,16.75 0 0 0 12,3.25 Z'],
-  ['translate(129 0)', 'M3.25,0 V40'],
-  ['translate(146.5 0)', 'M3.25,0 V25 A11.75,11.75 0 0 0 26.75,25 V0'],
-  ['translate(187.5 0)', 'M25.5,8.8 C23.3,5 19.3,3.25 14,3.25 C7.6,3.25 3.6,6.4 3.6,11.1 C3.6,15.8 7.4,17.6 14,19.4 C20.8,21.3 24.8,23.4 24.8,28.6 C24.8,33.6 20.4,36.75 14,36.75 C8.4,36.75 4.4,34.4 2.4,30.4']
-];
-
+// Логотип: знак (сквиркл с окном и синим срезом) + надпись ORDIUS
 export function Logo({ size = 30, onDark = false, variant = 'lockup' }) {
-  const wordH = Math.round(size * 0.62);
   const ink = onDark ? 'var(--on-graphite)' : 'var(--ink)';
+  const blue = 'var(--signal)';
+  if (variant === 'mark') {
+    return (
+      <svg role="img" aria-label="Ordius" viewBox="0 0 433 433" width={size} height={size} style={{ flex: 'none' }}>
+        <path fill={ink} fillRule="evenodd" d={MB} /><path fill={blue} d={MU} />
+      </svg>
+    );
+  }
   return (
-    <span role="img" aria-label="Ordius" style={{ display: 'inline-flex', alignItems: 'center', gap: Math.round(size * 0.4), lineHeight: 0 }}>
-      {variant !== 'wordmark' && (
-        <svg viewBox="0 0 64 64" width={size} height={size} aria-hidden="true">
-          <path d={SQ} fill="var(--graphite)" stroke={onDark ? 'rgba(255,255,255,.12)' : 'none'} />
-          <circle cx="32" cy="32" r="14" fill="none" stroke="#F3F4F6" strokeWidth="7" strokeDasharray="74.2 13.8" transform="rotate(-24 32 32)" />
-          <path d="M30.2 33.8 L48.5 15.5" stroke="var(--signal)" strokeWidth="5.5" strokeLinecap="square" />
-        </svg>
-      )}
-      {variant !== 'mark' && (
-        <svg viewBox="0 0 215.5 40" height={wordH} width={Math.round(215.5 * wordH / 40)} aria-hidden="true">
-          <g fill="none" stroke={ink} strokeWidth="6.5">
-            {WORD.map(([t, d], i) => <path key={i} transform={t} d={d} />)}
-          </g>
-        </svg>
-      )}
-    </span>
+    <svg role="img" aria-label="Ordius" viewBox="0 0 2386 431" height={size} width={Math.round(size * 2386 / 431)} style={{ flex: 'none' }}>
+      <path fill={ink} fillRule="evenodd" d={WB} /><path fill={blue} d={WU} />
+    </svg>
   );
 }
 
