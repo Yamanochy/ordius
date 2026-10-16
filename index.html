@@ -69,7 +69,7 @@
     .top nav { display: flex; gap: 4px; margin-left: auto; }
     .top nav a { white-space: nowrap; color: var(--on-graphite-muted); text-decoration: none; font-size: 15px; font-weight: 500; padding: 8px 12px; border-radius: 8px; }
     .top nav a:hover { color: var(--on-graphite); background: var(--graphite-2); }
-    .brand { display: flex; }
+    .brand { display: flex; flex: none; }
     .theme-btn { width: 40px; height: 40px; flex: none; border-radius: 10px; border: 1px solid rgba(243,244,246,.22); background: transparent; color: var(--on-graphite); display: grid; place-items: center; cursor: pointer; }
     .theme-btn:hover { border-color: rgba(243,244,246,.55); }
     .theme-btn .i-sun { display: none; }
@@ -180,6 +180,31 @@
     .biz-item b { font-weight: 600; }
     .biz-item span { color: var(--on-graphite-muted); font-size: 16px; line-height: 25px; }
 
+    /* Announce */
+    .announce { background: var(--signal); color: #fff; font-size: 15px; line-height: 22px; }
+    .announce .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 16px; padding-top: 9px; padding-bottom: 9px; text-align: center; }
+    .announce b { font-weight: 600; }
+    .announce a { color: #fff; font-weight: 600; text-underline-offset: 3px; }
+
+    /* Launch / pilot */
+    .launch { background: var(--surface-1); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .launch-grid { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 64px; align-items: start; }
+    .launch-copy { display: flex; flex-direction: column; gap: 20px; }
+    .launch-date { font-family: var(--font-display); font-size: 22px; line-height: 28px; font-weight: 600; color: var(--signal-text); }
+    .launch-date .num { font-size: 26px; letter-spacing: -0.02em; }
+    .perks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .perks li { padding-left: 28px; position: relative; }
+    .perks li::before { content: ""; position: absolute; left: 2px; top: 9px; width: 12px; height: 7px; border-left: 2px solid var(--signal); border-bottom: 2px solid var(--signal); transform: rotate(-45deg); }
+    .plan-steps { list-style: none; margin: 0; padding: 0; counter-reset: st; display: flex; flex-direction: column; }
+    .plan-steps li { counter-increment: st; position: relative; padding: 0 0 28px 56px; display: flex; flex-direction: column; gap: 4px; }
+    .plan-steps li::before { content: counter(st); position: absolute; left: 0; top: -2px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--signal-soft); color: var(--signal-text); font-family: var(--font-mono); font-weight: 600; font-size: 15px; }
+    .plan-steps li::after { content: ""; position: absolute; left: 17px; top: 40px; bottom: 4px; width: 2px; background: var(--line); }
+    .plan-steps li:last-child { padding-bottom: 0; }
+    .plan-steps li:last-child::after { display: none; }
+    .plan-steps li:last-child::before { background: var(--signal); color: #fff; }
+    .plan-steps b { font-weight: 600; font-size: 18px; line-height: 26px; }
+    .plan-steps span { color: var(--ink-muted); }
+
     /* Pricing */
     .plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
     .plan { background: var(--surface-1); border: 1px solid var(--line); border-radius: 20px; padding: 36px; display: flex; flex-direction: column; gap: 20px; }
@@ -222,7 +247,7 @@
     :root[data-theme="dark"] [data-theme-img="light"] { display: none !important; }
     .no-contact [data-contact] { display: none !important; }
 
-    @media (max-width: 1120px) { .top nav { display: none; } .theme-btn { margin-left: auto; } }
+    @media (max-width: 1300px) { .top nav { display: none; } .theme-btn { margin-left: auto; } }
     @media (max-width: 1040px) {
       .chain { grid-template-columns: 1fr; gap: 28px; }
       .step { padding: 0 0 0 28px; }
@@ -230,10 +255,13 @@
       .step:last-child::before { bottom: 0; }
       .biz-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .ai-grid { grid-template-columns: 1fr; max-width: 560px; }
+      .launch-grid { grid-template-columns: 1fr; gap: 48px; }
       .feat { grid-template-columns: 1fr; gap: 32px; }
       .feat.flip .feat-copy { order: 0; }
     }
     @media (max-width: 760px) {
+      .top .brand { margin-right: 0; }
+      .top .wrap { gap: 10px; }
       :root { --gutter: 16px; }
       body { font-size: 16px; line-height: 25px; }
       section { padding: 72px 0; }
@@ -266,6 +294,9 @@
   </style>
 </head>
 <body class="no-contact">
+  <div class="announce">
+    <div class="wrap"><span><b>Запуск Ordius — 1 декабря 2026.</b> Идёт запись на пилот.</span><a href="#pilot">Записаться</a></div>
+  </div>
   <header class="top">
     <div class="wrap">
       <a class="brand" href="#" aria-label="Ordius — на главную"><img src="brand/ordius-lockup-on-dark.svg" alt="Ordius" width="144" height="26" /></a>
@@ -274,6 +305,7 @@
         <a href="#features">Возможности</a>
         <a href="#assistant">ИИ-помощник</a>
         <a href="#business">Для крупных парков</a>
+        <a href="#pilot">Запуск</a>
         <a href="#pricing">Тарифы</a>
         <a href="#faq">Вопросы</a>
       </nav>
@@ -290,7 +322,7 @@
           <p class="lead">Водитель отмечает смену в телефоне и прикладывает фото путевого. Механик ведёт ремонт до приёмки. Бухгалтер видит, кому сколько выплатить. Вы видите, сколько приносит каждый объект и каждая машина.</p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="demo/">Открыть демо</a>
-            <a class="btn btn-line" data-contact href="#">Обсудить внедрение</a>
+            <a class="btn btn-line" href="#pilot">Записаться на пилот</a>
           </div>
           <p class="hero-ai"><span class="ai-tag">ИИ</span>Внутри — Орди, помощник на искусственном интеллекте: водитель говорит «Орди, отметь смену», и смена заполнена.</p>
           <p class="hero-note">Демо без регистрации: вымышленная компания, 6 машин, 7 ролей. Всё нажимается.</p>
@@ -480,6 +512,34 @@
       </div>
     </section>
 
+    <section class="launch" id="pilot" aria-labelledby="pilot-title">
+      <div class="wrap">
+        <div class="launch-grid">
+          <div class="launch-copy">
+            <p class="launch-date"><span class="num">01.12.2026</span> — старт рабочей версии</p>
+            <h2 id="pilot-title">Идёт запись на пилот</h2>
+            <p class="lead">Первые десять компаний начнут работать в Ordius 1 декабря — с чистого расчётного периода. В ноябре мы вместе подготовим всё к запуску, вам останется раздать водителям ссылку.</p>
+            <ul class="perks">
+              <li>Перенесём табель, водителей и технику из Excel сами</li>
+              <li>Настроим ставки, объекты и роли под ваш парк</li>
+              <li>Первый месяц работы — бесплатно</li>
+              <li>Ваши пожелания по функциям — в приоритете</li>
+            </ul>
+            <div class="hero-actions">
+              <a class="btn btn-primary" data-contact href="#">Записаться на пилот</a>
+              <a class="btn btn-ghost" href="demo/">Сначала посмотреть демо</a>
+            </div>
+          </div>
+          <ol class="plan-steps" aria-label="Как пройдёт запуск">
+            <li><b>Заявка</b><span>Пишете нам в Telegram. Отвечаем в тот же день.</span></li>
+            <li><b>Разговор на 20 минут</b><span>Как у вас сейчас ведутся смены и зарплата, сколько машин и объектов.</span></li>
+            <li><b>Ноябрь — подготовка</b><span>Переносим данные, настраиваем ставки, проверяем расчёт на ваших цифрах.</span></li>
+            <li><b>1 декабря — старт</b><span>Водители отмечают смены в телефоне, вы видите всё в Ordius.</span></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
     <section id="pricing" aria-labelledby="price-title">
       <div class="wrap">
         <div class="head">
@@ -521,7 +581,7 @@
         </div>
         <div class="pilot">
           <p><b>Первый месяц на любом тарифе — бесплатно.</b> Перенесём ваш текущий табель и список техники из Excel сами, настроим ставки и подключим водителей. Платить начнёте, только если Ordius вам подошёл.</p>
-          <a class="btn btn-primary" data-contact href="#">Начать бесплатный месяц</a>
+          <a class="btn btn-primary" href="#pilot">Записаться на пилот</a>
         </div>
       </div>
     </section>
@@ -547,7 +607,7 @@
         <p class="lead">В демо можно побыть владельцем, диспетчером, механиком, бухгалтером и водителем. Переключение ролей — в верхней полосе.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="demo/">Открыть демо</a>
-          <a class="btn btn-line" data-contact href="#">Написать нам в Telegram</a>
+          <a class="btn btn-line" data-contact href="#">Записаться на пилот в Telegram</a>
         </div>
       </div>
     </section>
