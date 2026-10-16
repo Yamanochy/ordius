@@ -3,26 +3,486 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ordius — смены, техника и зарплата водителей</title>
-  <meta name="description" content="Ordius — учёт смен, техники, ремонтов и зарплаты водителей для автопарков и владельцев спецтехники." />
+  <title>Ordius — учёт смен, ремонтов и зарплаты водителей для автопарков и спецтехники</title>
+  <meta name="description" content="Водитель отмечает смену в телефоне, механик ведёт ремонт, бухгалтер видит, кому сколько выплатить. Табель, ремонты, топливные карты и маржа по объектам для владельцев спецтехники и грузовых автопарков." />
+  <meta name="theme-color" content="#1C2129" />
+  <link rel="canonical" href="https://ordius.ru/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="ru_RU" />
+  <meta property="og:title" content="Ordius — смены, ремонты и зарплата водителей в одном месте" />
+  <meta property="og:description" content="Учёт для владельцев спецтехники и грузовых автопарков. Откройте демо — без регистрации." />
+  <meta property="og:image" content="https://ordius.ru/img/og.png" />
+  <meta property="og:url" content="https://ordius.ru/" />
   <link rel="icon" href="demo/favicon.svg" type="image/svg+xml" />
-  <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@700&family=Onest:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="apple-touch-icon" href="brand/avatar/ordius-avatar-dark.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@500;600;700&family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
   <style>
-    :root { --bg: #F3F4F6; --ink: #14171C; --muted: #555D6B; --signal: #2F6BFF; --graphite: #1C2129; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #0E1115; --ink: #ECEEF2; --muted: #A7AEBA; --signal: #5B8CFF; } }
-    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--ink); font-family: "Onest", system-ui, sans-serif; padding: 24px; box-sizing: border-box; }
-    main { max-width: 560px; display: flex; flex-direction: column; gap: 20px; }
-    h1 { font-family: "Geologica", sans-serif; font-size: 40px; line-height: 44px; margin: 0; letter-spacing: -0.02em; }
-    p { color: var(--muted); font-size: 17px; line-height: 26px; margin: 0; }
-    a.btn { align-self: flex-start; background: var(--signal); color: #fff; text-decoration: none; font-weight: 600; padding: 14px 22px; border-radius: 10px; }
+    :root {
+      --graphite: #1C2129; --graphite-2: #262C36; --on-graphite: #F3F4F6; --on-graphite-muted: #A9B0BC;
+      --surface-0: #F3F4F6; --surface-1: #FFFFFF; --surface-2: #E8EAEE;
+      --ink: #14171C; --ink-muted: #555D6B; --line: #DDE0E6; --line-strong: #C3C8D1;
+      --signal: #2F6BFF; --signal-text: #1F55D9; --signal-soft: #E6EEFF; --signal-on-dark: #5B8CFF;
+      --success: #13794A; --success-soft: #E3F4EB; --warning: #9A5B00; --warning-soft: #FCF0DA; --danger: #B42318; --danger-soft: #FDECEA;
+      --font-display: "Geologica", system-ui, sans-serif; --font-sans: "Onest", system-ui, sans-serif; --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --wrap: 1200px; --gutter: 24px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface-0: #0F1217; --surface-1: #171B21; --surface-2: #20252D;
+        --ink: #ECEEF2; --ink-muted: #A7AEBA; --line: #2A3039; --line-strong: #3A414C;
+        --signal: #4B7FFF; --signal-text: #8DB0FF; --signal-soft: #1A2744;
+        --success: #4CC38A; --success-soft: #12291F; --warning: #E8A84A; --warning-soft: #2E2312; --danger: #F07A6E; --danger-soft: #331816;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    body { margin: 0; background: var(--surface-0); color: var(--ink); font-family: var(--font-sans); font-size: 17px; line-height: 27px; -webkit-font-smoothing: antialiased; }
+    img { display: block; max-width: 100%; height: auto; }
+    a { color: inherit; }
+    .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 var(--gutter); }
+    :focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 4px; }
+    .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+    h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.02em; }
+    h2 { font-size: 40px; line-height: 46px; font-weight: 700; max-width: 22ch; }
+    h3 { font-size: 21px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+    p { margin: 0; }
+    .lead { font-size: 19px; line-height: 30px; color: var(--ink-muted); max-width: 60ch; }
+    section { padding: 112px 0; }
+    .head { display: flex; flex-direction: column; gap: 16px; margin-bottom: 56px; }
+
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 52px; padding: 0 24px; border-radius: 12px; font: 600 16px/1 var(--font-sans); text-decoration: none; border: 1px solid transparent; cursor: pointer; transition: background-color .15s, border-color .15s; white-space: nowrap; }
+    .btn-primary { background: var(--signal); color: #fff; }
+    .btn-primary:hover { background: #1F55D9; }
+    .btn-line { border-color: rgba(243,244,246,.28); color: var(--on-graphite); }
+    .btn-line:hover { border-color: rgba(243,244,246,.6); }
+    .btn-sm { height: 40px; padding: 0 16px; font-size: 15px; border-radius: 10px; }
+    .btn svg { flex: none; }
+
+    /* Header */
+    .top { position: sticky; top: 0; z-index: 10; background: var(--graphite); border-bottom: 1px solid rgba(255,255,255,.06); }
+    .top .wrap { display: flex; align-items: center; gap: 32px; height: 68px; }
+    .top nav { display: flex; gap: 4px; margin-left: auto; }
+    .top nav a { color: var(--on-graphite-muted); text-decoration: none; font-size: 15px; font-weight: 500; padding: 8px 12px; border-radius: 8px; }
+    .top nav a:hover { color: var(--on-graphite); background: var(--graphite-2); }
+    .brand { display: flex; }
+    .brand img { height: 26px; width: auto; }
+
+    /* Hero */
+    .hero { background: var(--graphite); color: var(--on-graphite); padding: 88px 0 0; overflow: hidden; }
+    .hero-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 56px; }
+    .hero-copy { display: flex; flex-direction: column; gap: 28px; max-width: 760px; }
+    .hero h1 { font-size: 64px; line-height: 68px; font-weight: 700; letter-spacing: -0.035em; }
+    .hero .lead { color: var(--on-graphite-muted); font-size: 20px; line-height: 31px; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .hero-note { font-size: 15px; color: var(--on-graphite-muted); }
+    .shot-stage { position: relative; margin-top: 8px; padding-bottom: 0; }
+    .browser { border-radius: 14px 14px 0 0; overflow: hidden; background: #2A3039; box-shadow: 0 -1px 0 rgba(255,255,255,.08), 0 30px 80px rgba(0,0,0,.45); margin-right: 140px; }
+    .browser-bar { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 14px; }
+    .browser-bar i { width: 10px; height: 10px; border-radius: 50%; background: #454C58; }
+    .browser-bar span { margin-left: 14px; font: 500 12px/1 var(--font-mono); color: var(--on-graphite-muted); background: #1F242C; padding: 6px 12px; border-radius: 6px; }
+    .phone-shot { position: absolute; right: 0; bottom: 48px; width: 250px; filter: drop-shadow(0 30px 50px rgba(0,0,0,.5)); }
+
+    /* Before / after */
+    .ba { border-top: 1px solid var(--line); }
+    .ba-row { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; padding: 28px 0; border-bottom: 1px solid var(--line); }
+    .ba-row p { max-width: 46ch; }
+    .ba-was { color: var(--ink-muted); }
+    .ba-now { font-weight: 500; }
+    .ba-cap { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; padding-bottom: 14px; font-size: 15px; font-weight: 600; color: var(--ink-muted); }
+    .ba-cap span:last-child { color: var(--signal-text); }
+
+    /* Chain */
+    .chain-sec { background: var(--surface-1); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .chain { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; counter-reset: st; }
+    .step { position: relative; padding: 0 20px 0 0; display: flex; flex-direction: column; gap: 10px; }
+    .step::before { content: ""; height: 6px; border-radius: 3px; background: var(--signal); margin-bottom: 14px; transition: background-color .4s ease; }
+    .step .who { font-size: 15px; font-weight: 600; color: var(--ink-muted); }
+    .step .what { font-weight: 500; line-height: 25px; }
+    .badge { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 500; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-muted); white-space: nowrap; }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .b-info { background: var(--signal-soft); color: var(--signal-text); }
+    .b-warn { background: var(--warning-soft); color: var(--warning); }
+    .b-ok { background: var(--success-soft); color: var(--success); }
+    .js .chain .step { transition: opacity .4s ease; }
+    .js .chain:not(.run) .step { opacity: .35; }
+    .js .chain:not(.run) .step::before { background: var(--surface-2); }
+    .js .chain.run .step:nth-child(2), .js .chain.run .step:nth-child(2)::before { transition-delay: .5s; }
+    .js .chain.run .step:nth-child(3), .js .chain.run .step:nth-child(3)::before { transition-delay: 1s; }
+    .js .chain.run .step:nth-child(4), .js .chain.run .step:nth-child(4)::before { transition-delay: 1.5s; }
+    .js .chain.run .step:nth-child(5), .js .chain.run .step:nth-child(5)::before { transition-delay: 2s; }
+    .chain-foot { margin-top: 48px; display: flex; flex-wrap: wrap; gap: 16px 40px; color: var(--ink-muted); font-size: 16px; }
+    .chain-foot b { color: var(--ink); font-weight: 600; }
+
+    /* Feature rows */
+    .feat { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: center; padding: 56px 0; }
+    .feat + .feat { border-top: 1px solid var(--line); }
+    .feat.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+    .feat.flip .feat-copy { order: 2; }
+    .feat-copy { display: flex; flex-direction: column; gap: 16px; }
+    .feat-copy ul { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .feat-copy li { padding-left: 28px; position: relative; color: var(--ink-muted); }
+    .feat-copy li::before { content: ""; position: absolute; left: 2px; top: 9px; width: 12px; height: 7px; border-left: 2px solid var(--signal); border-bottom: 2px solid var(--signal); transform: rotate(-45deg); }
+    .frame { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-1); box-shadow: 0 1px 2px rgba(20,23,28,.05), 0 12px 32px rgba(20,23,28,.08); }
+    .frame img { width: 100%; }
+    .frame.crop { aspect-ratio: 16 / 10; }
+    .frame.crop img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+
+    /* Roles */
+    .roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 48px; border-top: 1px solid var(--line); }
+    .role { padding: 22px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+    .role b { font-weight: 600; }
+    .role span { color: var(--ink-muted); font-size: 16px; line-height: 25px; }
+
+    /* Business */
+    .biz { background: var(--graphite); color: var(--on-graphite); }
+    .biz .lead { color: var(--on-graphite-muted); }
+    .biz-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; border-top: 1px solid rgba(255,255,255,.1); }
+    .biz-item { padding: 22px 0; border-bottom: 1px solid rgba(255,255,255,.1); display: flex; flex-direction: column; gap: 4px; }
+    .biz-item b { font-weight: 600; }
+    .biz-item span { color: var(--on-graphite-muted); font-size: 16px; line-height: 25px; }
+
+    /* Pricing */
+    .plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .plan { background: var(--surface-1); border: 1px solid var(--line); border-radius: 20px; padding: 36px; display: flex; flex-direction: column; gap: 20px; }
+    .plan.pro { border: 2px solid var(--signal); padding: 35px; }
+    .plan-name { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .price { font-family: var(--font-mono); font-size: 40px; line-height: 44px; font-weight: 600; letter-spacing: -0.03em; white-space: nowrap; }
+    .price small { font-family: var(--font-sans); font-size: 16px; font-weight: 500; letter-spacing: 0; color: var(--ink-muted); }
+    .plan-for { color: var(--ink-muted); }
+    .plan ul { list-style: none; margin: 0; padding: 20px 0 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; font-size: 16px; line-height: 24px; }
+    .plan li { padding-left: 28px; position: relative; }
+    .plan li::before { content: ""; position: absolute; left: 2px; top: 7px; width: 12px; height: 7px; border-left: 2px solid var(--signal); border-bottom: 2px solid var(--signal); transform: rotate(-45deg); }
+    .plan .btn { margin-top: auto; align-self: flex-start; }
+    .btn-ghost { border-color: var(--line-strong); color: var(--ink); }
+    .btn-ghost:hover { background: var(--surface-2); }
+    .pilot { margin-top: 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px 32px; padding: 28px 36px; border-radius: 20px; background: var(--signal-soft); }
+    .pilot p { max-width: 64ch; }
+    .pilot b { font-weight: 600; }
+
+    /* FAQ */
+    .faq { max-width: 860px; border-top: 1px solid var(--line); }
+    .faq details { border-bottom: 1px solid var(--line); }
+    .faq summary { list-style: none; cursor: pointer; padding: 22px 44px 22px 0; font-weight: 600; font-size: 18px; position: relative; }
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: ""; position: absolute; right: 8px; top: 28px; width: 10px; height: 10px; border-right: 2px solid var(--ink-muted); border-bottom: 2px solid var(--ink-muted); transform: rotate(45deg); transition: transform .2s; }
+    .faq details[open] summary::after { transform: rotate(-135deg); top: 33px; }
+    .faq details p { padding: 0 0 24px; color: var(--ink-muted); max-width: 70ch; }
+
+    /* Final */
+    .final { background: var(--graphite); color: var(--on-graphite); padding: 96px 0; }
+    .final .wrap { display: flex; flex-direction: column; gap: 24px; align-items: flex-start; }
+    .final h2 { max-width: 20ch; font-size: 48px; line-height: 54px; }
+    .final .lead { color: var(--on-graphite-muted); }
+    footer { background: var(--graphite); color: var(--on-graphite-muted); font-size: 14px; border-top: 1px solid rgba(255,255,255,.08); }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: center; justify-content: space-between; padding-top: 28px; padding-bottom: 28px; }
+    footer img { height: 20px; width: auto; }
+
+    .no-contact [data-contact] { display: none !important; }
+
+    @media (max-width: 1040px) {
+      .chain { grid-template-columns: 1fr; gap: 28px; }
+      .step { padding: 0 0 0 28px; }
+      .step::before { position: absolute; left: 0; top: 4px; bottom: -24px; width: 6px; height: auto; margin: 0; }
+      .step:last-child::before { bottom: 0; }
+      .biz-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .feat { grid-template-columns: 1fr; gap: 32px; }
+      .feat.flip .feat-copy { order: 0; }
+    }
+    @media (max-width: 760px) {
+      :root { --gutter: 16px; }
+      body { font-size: 16px; line-height: 25px; }
+      section { padding: 72px 0; }
+      .head { margin-bottom: 36px; }
+      h2, .final h2 { font-size: 30px; line-height: 36px; }
+      .hero { padding-top: 48px; }
+      .hero h1 { font-size: 38px; line-height: 43px; }
+      .hero .lead, .lead { font-size: 17px; line-height: 27px; }
+      .top nav { display: none; }
+      .top .wrap { justify-content: space-between; }
+      .browser { display: none; }
+      .phone-shot { position: relative; right: auto; bottom: auto; width: 76%; max-width: 300px; margin: 0 auto -150px; }
+      .ba-cap { display: none; }
+      .ba-row { grid-template-columns: 1fr; gap: 6px; padding: 20px 0; }
+      .ba-was { text-decoration: line-through; text-decoration-color: var(--line-strong); }
+      .biz-list, .plans { grid-template-columns: 1fr; }
+      .plan, .plan.pro { padding: 24px; }
+      .pilot { padding: 24px; }
+      .btn { height: 48px; }
+      .hero-actions .btn { flex: 1 1 auto; }
+    }
   </style>
 </head>
-<body>
+<body class="no-contact">
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="#" aria-label="Ordius — на главную"><img src="brand/ordius-lockup-on-dark.svg" alt="Ordius" width="144" height="26" /></a>
+      <nav aria-label="Разделы">
+        <a href="#how">Как работает</a>
+        <a href="#features">Возможности</a>
+        <a href="#business">Для крупных парков</a>
+        <a href="#pricing">Тарифы</a>
+        <a href="#faq">Вопросы</a>
+      </nav>
+      <a class="btn btn-primary btn-sm" href="demo/">Открыть демо</a>
+    </div>
+  </header>
+
   <main>
-    <picture><source srcset="brand/ordius-lockup-on-dark.svg" media="(prefers-color-scheme: dark)" /><img src="brand/ordius-lockup.svg" height="44" alt="Ordius" style="height:44px;width:auto" /></picture>
-    <h1>Смены, техника и зарплата водителей — в одном месте</h1>
-    <p>Ordius для автопарков и владельцев спецтехники: табель со смартфона водителя, ремонты от заявки до приёмки, расчёт зарплаты и маржа по каждому объекту. Сайт скоро появится — а демо уже работает.</p>
-    <a class="btn" href="demo/">Открыть демо</a>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <h1 id="hero-title">Смены, ремонты и зарплата водителей в одном месте</h1>
+          <p class="lead">Водитель отмечает смену в телефоне и прикладывает фото путевого. Механик ведёт ремонт до приёмки. Бухгалтер видит, кому сколько выплатить. Вы видите, сколько приносит каждый объект и каждая машина.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="demo/">Открыть демо</a>
+            <a class="btn btn-line" data-contact href="#">Обсудить внедрение</a>
+          </div>
+          <p class="hero-note">Демо без регистрации: вымышленная компания, 6 машин, 7 ролей. Всё нажимается.</p>
+        </div>
+        <div class="shot-stage">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><i></i><i></i><i></i><span>ordius.ru</span></div>
+            <img src="img/overview.webp" width="2880" height="1760" alt="Панель владельца в Ordius: фонд зарплаты 338 200 ₽, к выплате 98 200 ₽, маржа по объектам 152 800 ₽, смены по дням" />
+          </div>
+          <img class="phone-shot" src="img/driver.webp" width="780" height="1688" alt="Телефон водителя: заработано в октябре 54 000 ₽, аванс 40 000 ₽, осталось к выплате 14 000 ₽" />
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="ba-title">
+      <div class="wrap">
+        <div class="head">
+          <h2 id="ba-title">Что уходит из вашего дня</h2>
+          <p class="lead">Ordius сделан людьми, которые сами ведут парк спецтехники: самосвалы, экскаваторы, вакуумные машины, вахту и муниципальные контракты.</p>
+        </div>
+        <div class="ba-cap" aria-hidden="true"><span>Сейчас</span><span>С Ordius</span></div>
+        <div class="ba">
+          <div class="ba-row"><p class="ba-was">Водители присылают часы в мессенджер, табель собирается вручную в конце месяца.</p><p class="ba-now">Водитель отмечает смену в телефоне с фото путевого листа. Вам остаётся подтвердить одной кнопкой.</p></div>
+          <div class="ba-row"><p class="ba-was">Зарплату считаете вечером в Excel, авансы помните по памяти, удержания теряются.</p><p class="ba-now">Начислено, аванс, удержано и к выплате считаются сами. Водитель видит то же самое у себя.</p></div>
+          <div class="ba-row"><p class="ba-was">«Колесо заказали?» — пять звонков, и никто не знает, на ком сейчас ремонт.</p><p class="ba-now">Поломка идёт цепочкой: водитель, механик, снабжение, приёмка. У каждого шага есть статус и ответственный.</p></div>
+          <div class="ba-row"><p class="ba-was">Объект вроде работает, но приносит ли он деньги, видно только в конце года.</p><p class="ba-now">Выручка, зарплата, ремонты и топливо по каждому объекту — сразу после подтверждения смены.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chain-sec" id="how" aria-labelledby="chain-title">
+      <div class="wrap">
+        <div class="head">
+          <h2 id="chain-title">Поломка больше не теряется между людьми</h2>
+          <p class="lead">Задача сама переходит к тому, кто должен действовать дальше. Так выглядит замена колеса на самосвале.</p>
+        </div>
+        <ol class="chain" id="chain">
+          <li class="step"><span class="who">Водитель</span><span class="what">«Пробито заднее колесо, ехать нельзя» — фото с телефона</span><span class="badge b-info">К исполнению</span></li>
+          <li class="step"><span class="who">Механик</span><span class="what">Осматривает и заказывает шину 315/80 R22,5 одной кнопкой</span><span class="badge b-warn">Ждёт запчасть</span></li>
+          <li class="step"><span class="who">Снабжение</span><span class="what">Покупает. Дороже 20 000 ₽ — сначала согласование у владельца</span><span class="badge b-info">Закуплено</span></li>
+          <li class="step"><span class="who">Механик</span><span class="what">Получает шину, ставит, пишет, что сделано</span><span class="badge b-info">На приёмке</span></li>
+          <li class="step"><span class="who">Владелец</span><span class="what">Принимает ремонт. Машина снова на линии, затраты легли на объект</span><span class="badge b-ok">Принято</span></li>
+        </ol>
+        <div class="chain-foot">
+          <span><b>Машина в ремонте</b> сразу видна в планировщике и на панели</span>
+          <span><b>Счёт за шину</b> автоматически уходит бухгалтеру</span>
+          <span><b>ТО и ОСАГО</b> напоминают о себе задачей заранее</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" aria-labelledby="feat-title">
+      <div class="wrap">
+        <div class="head">
+          <h2 id="feat-title">Всё, что нужно парку на 5–30 машин</h2>
+        </div>
+
+        <div class="feat">
+          <div class="feat-copy">
+            <h3>Табель, который заполняют водители</h3>
+            <p class="lead">Смена приходит с телефона вместе с фото путевого или ТТН. Вы видите всю картину на две недели вперёд и назад и подтверждаете смены пачкой.</p>
+            <ul>
+              <li>Часы, смены, рейсы или тонно-километры — как вы платите</li>
+              <li>Переработка сверх 12 часов считается отдельно</li>
+              <li>Изменили ставку — прошлые смены не пересчитаются</li>
+            </ul>
+          </div>
+          <div class="frame crop"><img src="img/tabel.webp" width="2880" height="1760" loading="lazy" alt="Табель смен: водители по строкам, дни по столбцам, неподтверждённые смены выделены" /></div>
+        </div>
+
+        <div class="feat flip">
+          <div class="feat-copy">
+            <h3>Деньги по каждому объекту</h3>
+            <p class="lead">Сколько выставлено заказчику, сколько ушло на зарплату, ремонты и топливо. Убыточный объект видно сразу, а не в конце года.</p>
+            <ul>
+              <li>Ставка заказчика и ставка водителя хранятся отдельно</li>
+              <li>Ремонты берутся из закрытых заявок механика</li>
+              <li>Топливо — из чеков заправок</li>
+            </ul>
+          </div>
+          <div class="frame crop"><img src="img/objects.webp" width="2880" height="1760" loading="lazy" alt="Деньги по объектам: выставлено 1 068 000 ₽, затраты 915 200 ₽, маржа 152 800 ₽, один объект в убытке" /></div>
+        </div>
+
+        <div class="feat">
+          <div class="feat-copy">
+            <h3>Техника, ТО и топливные карты</h3>
+            <p class="lead">Карточка каждой машины: кто за ней закреплён, когда ТО и ОСАГО, какие были ремонты. Топливная карта привязана к машине, а ПИН-код показывается по правам и пишется в журнал.</p>
+            <ul>
+              <li>Номер карты, лимит, сколько заправлено за месяц</li>
+              <li>Блокировка карты владельцем в один клик</li>
+              <li>Водитель видит свою карту в телефоне</li>
+            </ul>
+          </div>
+          <div class="frame crop"><img src="img/fleet.webp" width="2880" height="1760" loading="lazy" alt="Карточка экскаватора-погрузчика: ТО по моточасам, ОСАГО, техосмотр, топливная карта" /></div>
+        </div>
+
+        <div class="feat flip">
+          <div class="feat-copy">
+            <h3>Бухгалтерия без пересказа</h3>
+            <p class="lead">Бухгалтер получает готовый список к оплате: начислено, аванс, удержания, остаток. Счета за запчасти приходят туда же из ремонтов.</p>
+            <ul>
+              <li>Статус «выплачено» и история выплат по каждому водителю</li>
+              <li>Выгрузка в Excel для 1С</li>
+              <li>Штрафы и ущерб удерживаются с указанием причины</li>
+            </ul>
+          </div>
+          <div class="frame crop"><img src="img/accounting.webp" width="2880" height="1760" loading="lazy" alt="Экран бухгалтера: зарплата к выплате по водителям и счета поставщиков" /></div>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="roles-title" style="padding-top: 0">
+      <div class="wrap">
+        <div class="head">
+          <h2 id="roles-title">Каждый видит своё</h2>
+          <p class="lead">Водителю не нужна маржа, бухгалтеру — ПИН-коды. Права настраиваются по ролям, каждое действие записывается в журнал.</p>
+        </div>
+        <div class="roles">
+          <div class="role"><b>Владелец</b><span>Деньги, техника, люди и всё, что ждёт решения</span></div>
+          <div class="role"><b>Диспетчер</b><span>Табель, распределение машин, задачи водителям</span></div>
+          <div class="role"><b>Механик</b><span>Заявки на ремонт, запчасти, выпуск на линию</span></div>
+          <div class="role"><b>Снабжение</b><span>Что купить, для какой машины и к какому сроку</span></div>
+          <div class="role"><b>Бухгалтер</b><span>Зарплата к выплате, счета, удержания</span></div>
+          <div class="role"><b>Водитель</b><span>Свои смены, заработок, аванс, топливная карта</span></div>
+          <div class="role"><b>Заказчик</b><span>Подтверждает смены и реестр по своему объекту</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="biz" id="business" aria-labelledby="biz-title">
+      <div class="wrap">
+        <div class="head">
+          <h2 id="biz-title">Для парков от 20 машин и нескольких площадок</h2>
+          <p class="lead">Тариф «Бизнес» добавляет то, без чего большой парк держится на одном диспетчере.</p>
+        </div>
+        <div class="biz-list">
+          <div class="biz-item"><b>Планировщик техники</b><span>Кто, где и когда работает; конфликты видны до выезда</span></div>
+          <div class="biz-item"><b>Кабинет заказчика</b><span>Заказчик сам подтверждает смены и реестр к оплате</span></div>
+          <div class="biz-item"><b>Филиалы</b><span>Несколько площадок и перемещение машин между ними</span></div>
+          <div class="biz-item"><b>Экономика каждой машины</b><span>Выручка и затраты по машине помесячно</span></div>
+          <div class="biz-item"><b>Склад запчастей и шин</b><span>Остатки, списание на ремонт, заказ поставщику</span></div>
+          <div class="biz-item"><b>Топливо</b><span>Нормы расхода, заправки и перерасход по машинам</span></div>
+          <div class="biz-item"><b>GPS и датчики</b><span>Простой, выезд за объект и слив — сразу задачей диспетчеру</span></div>
+          <div class="biz-item"><b>Вахта</b><span>Графики заездов, билеты, проживание, медосмотры</span></div>
+          <div class="biz-item"><b>Кадры и допуски</b><span>Права, медкомиссии и удостоверения с напоминаниями</span></div>
+          <div class="biz-item"><b>Выпуск на линию</b><span>Чек-лист механика в телефоне; замечание становится заявкой</span></div>
+          <div class="biz-item"><b>Штрафы ГИБДД</b><span>Привязка к водителю и удержание из зарплаты</span></div>
+          <div class="biz-item"><b>Права доступа и журнал</b><span>Кто что видит и кто что менял</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pricing" aria-labelledby="price-title">
+      <div class="wrap">
+        <div class="head">
+          <h2 id="price-title">Тарифы</h2>
+          <p class="lead">Цена зависит от размера парка, а не от числа водителей и сотрудников в офисе.</p>
+        </div>
+        <div class="plans">
+          <div class="plan">
+            <div class="plan-name"><h3>Старт</h3></div>
+            <div class="price">3 900 ₽<small> в месяц</small></div>
+            <p class="plan-for">До 10 единиц техники. Для владельца, который сам себе диспетчер.</p>
+            <ul>
+              <li>Табель со смартфона водителя и фото документов</li>
+              <li>Зарплата, авансы, удержания</li>
+              <li>Ремонты цепочкой: водитель, механик, снабжение</li>
+              <li>Деньги по объектам</li>
+              <li>Техника, ТО, топливные карты</li>
+              <li>Все 7 ролей, без ограничения пользователей</li>
+            </ul>
+            <a class="btn btn-ghost" href="demo/#owner/overview">Посмотреть в демо</a>
+          </div>
+          <div class="plan pro">
+            <div class="plan-name"><h3>Бизнес</h3><span class="badge b-info">12 дополнительных разделов</span></div>
+            <div class="price">11 900 ₽<small> в месяц</small></div>
+            <p class="plan-for">До 40 единиц техники. Больше — посчитаем под ваш парк.</p>
+            <ul>
+              <li>Всё из тарифа «Старт»</li>
+              <li>Планировщик техники и кабинет заказчика</li>
+              <li>Филиалы, склад запчастей и шин</li>
+              <li>Экономика каждой машины, топливо, GPS</li>
+              <li>Вахта, кадры, выпуск на линию, штрафы</li>
+              <li>Права доступа и полный журнал действий</li>
+            </ul>
+            <a class="btn btn-primary" href="demo/#owner/planner">Посмотреть в демо</a>
+          </div>
+        </div>
+        <div class="pilot">
+          <p><b>Первым десяти компаниям — три месяца бесплатно.</b> Перенесём ваш текущий табель и список техники из Excel сами, настроим ставки и подключим водителей. Взамен попросим честный отзыв.</p>
+          <a class="btn btn-primary" data-contact href="#">Стать пилотной компанией</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" aria-labelledby="faq-title" style="padding-top: 0">
+      <div class="wrap">
+        <div class="head"><h2 id="faq-title">Вопросы</h2></div>
+        <div class="faq">
+          <details><summary>Нужно ли водителям ставить приложение?</summary><p>Нет. Ordius открывается в браузере телефона по ссылке, его можно добавить на главный экран как обычное приложение. Работает на Android и iPhone.</p></details>
+          <details><summary>Где хранятся данные?</summary><p>На серверах в России, как требует закон о персональных данных (152-ФЗ). Доступ к данным каждой компании есть только у её сотрудников.</p></details>
+          <details><summary>Как платим водителям — по часам, а у нас рейсы и тонны</summary><p>Ставки бывают за час, смену, рейс и тонно-километр, их можно сочетать с окладом и коэффициентами за ночь, праздники и переработку. Ставку можно привязать к водителю, машине или объекту.</p></details>
+          <details><summary>Сколько времени займёт запуск?</summary><p>Обычно один-два дня. Присылаете табель и список техники в любом виде, мы переносим их сами. Водителям отправляем ссылку и код компании.</p></details>
+          <details><summary>Что если водитель работает в двух компаниях?</summary><p>Один вход на обе. Смены и заработок у каждой компании свои и друг другу не видны.</p></details>
+          <details><summary>Можно ли выгрузить данные для бухгалтерии?</summary><p>Да, табель и расчёт зарплаты выгружаются в Excel. Из него бухгалтер переносит данные в 1С.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final" aria-labelledby="final-title">
+      <div class="wrap">
+        <h2 id="final-title">Посмотрите на свой парк глазами Ordius</h2>
+        <p class="lead">В демо можно побыть владельцем, диспетчером, механиком, бухгалтером и водителем. Переключение ролей — в верхней полосе.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="demo/">Открыть демо</a>
+          <a class="btn btn-line" data-contact href="#">Написать нам в Telegram</a>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <footer>
+    <div class="wrap">
+      <img src="brand/ordius-lockup-on-dark.svg" alt="Ordius" width="111" height="20" />
+      <span>© 2026 Ordius. Учёт смен, техники и зарплаты водителей.</span>
+    </div>
+  </footer>
+
+  <script>
+    // Контакт: впишите ссылку на Telegram, например 'https://t.me/ordius_ru'. Пока пусто — кнопки связи скрыты.
+    var CONTACT = '';
+    document.documentElement.classList.add('js');
+    if (CONTACT) {
+      document.body.classList.remove('no-contact');
+      document.querySelectorAll('[data-contact]').forEach(function (a) { a.href = CONTACT; a.target = '_blank'; a.rel = 'noopener'; });
+    }
+    var chain = document.getElementById('chain');
+    var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (still || !('IntersectionObserver' in window)) { chain.classList.add('run'); }
+    else {
+      var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { chain.classList.add('run'); io.disconnect(); } }); }, { threshold: 0.5 });
+      io.observe(chain);
+    }
+  </script>
 </body>
 </html>
