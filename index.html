@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ordius — ваш парк под контролем, от смены до выплаты</title>
-  <meta name="description" content="Водитель отмечает смену в телефоне, механик ведёт ремонт, бухгалтер видит, кому сколько выплатить. Табель, ремонты, топливные карты и маржа по объектам для владельцев спецтехники и грузовых автопарков." />
+  <meta name="description" content="Ordius с ИИ-помощником Орди. Водитель отмечает смену в телефоне, механик ведёт ремонт, бухгалтер видит, кому сколько выплатить. Табель, ремонты, топливные карты и маржа по объектам для владельцев спецтехники и грузовых автопарков." />
   <meta name="theme-color" content="#1C2129" />
   <script>try{var t=localStorage.getItem('ordius-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
   <link rel="canonical" href="https://ordius.ru/" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="ru_RU" />
   <meta property="og:title" content="Ordius — ваш парк под контролем, от смены до выплаты" />
-  <meta property="og:description" content="Учёт для владельцев спецтехники и грузовых автопарков. Откройте демо — без регистрации." />
+  <meta property="og:description" content="Учёт для владельцев спецтехники и грузовых автопарков с ИИ-помощником Орди. Откройте демо — без регистрации." />
   <meta property="og:image" content="https://ordius.ru/img/og.png" />
   <meta property="og:url" content="https://ordius.ru/" />
   <link rel="icon" href="demo/favicon.svg" type="image/svg+xml" />
@@ -85,6 +85,8 @@
     .hero .lead { color: var(--on-graphite-muted); font-size: 20px; line-height: 31px; }
     .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
     .hero-note { font-size: 15px; color: var(--on-graphite-muted); }
+    .hero-ai { display: flex; align-items: flex-start; gap: 12px; max-width: 62ch; font-size: 17px; line-height: 26px; color: var(--on-graphite); }
+    .ai-tag { flex: none; margin-top: 2px; padding: 1px 8px; border-radius: 7px; background: var(--signal); color: #fff; font-size: 13px; line-height: 20px; font-weight: 700; letter-spacing: .04em; }
     .shot-stage { position: relative; margin-top: 8px; padding-bottom: 0; }
     .browser { border-radius: 14px 14px 0 0; overflow: hidden; background: #2A3039; box-shadow: 0 -1px 0 rgba(255,255,255,.08), 0 30px 80px rgba(0,0,0,.45); margin-right: 140px; }
     .browser-bar { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 14px; }
@@ -158,6 +160,8 @@
     .bub.bot { align-self: flex-start; background: var(--surface-1); border: 1px solid var(--line); border-top-left-radius: 6px; }
     .bub.voice { display: inline-flex; gap: 8px; align-items: flex-start; }
     .bub.voice svg { flex: none; margin-top: 3px; }
+    .bub-name { display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--signal-text); margin-bottom: 2px; }
+    .bub-name::after { content: "ИИ"; padding: 0 5px; border-radius: 5px; background: var(--signal); color: #fff; font-size: 10px; line-height: 15px; font-weight: 700; letter-spacing: .04em; }
     .bub .ok { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--success-soft); color: var(--success); font-size: 14px; font-weight: 600; }
     .ai-rules { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 16px 40px; color: var(--ink-muted); font-size: 16px; }
     .ai-rules b { color: var(--ink); font-weight: 600; }
@@ -268,7 +272,7 @@
       <nav aria-label="Разделы">
         <a href="#how">Как работает</a>
         <a href="#features">Возможности</a>
-        <a href="#assistant">Помощник</a>
+        <a href="#assistant">ИИ-помощник</a>
         <a href="#business">Для крупных парков</a>
         <a href="#pricing">Тарифы</a>
         <a href="#faq">Вопросы</a>
@@ -288,6 +292,7 @@
             <a class="btn btn-primary" href="demo/">Открыть демо</a>
             <a class="btn btn-line" data-contact href="#">Обсудить внедрение</a>
           </div>
+          <p class="hero-ai"><span class="ai-tag">ИИ</span>Внутри — Орди, помощник на искусственном интеллекте: водитель говорит «Орди, отметь смену», и смена заполнена.</p>
           <p class="hero-note">Демо без регистрации: вымышленная компания, 6 машин, 7 ролей. Всё нажимается.</p>
         </div>
         <div class="shot-stage">
@@ -400,36 +405,36 @@
     <section class="ai-sec" id="assistant" aria-labelledby="ai-title">
       <div class="wrap">
         <div class="head">
-          <h2 id="ai-title">Помощник, который знает ваш парк</h2>
-          <p class="lead">У каждого сотрудника в Ordius есть помощник. Он отвечает на вопросы, показывает цифры из системы и вносит данные — голосом или текстом. Водителю не нужно разбираться в программе, бухгалтеру — помнить, где какая кнопка.</p>
+          <h2 id="ai-title">Орди — ИИ-помощник, который знает ваш парк</h2>
+          <p class="lead">В Ordius встроен помощник на искусственном интеллекте. Орди понимает обычную речь — так, как говорят в кабине и в офисе: отвечает на вопросы, считает по данным вашей компании и сам заполняет смены, задачи и выплаты. Голосом или текстом, у каждой роли свой.</p>
         </div>
         <div class="ai-grid">
           <div class="ai-case">
             <span class="ai-who">Водитель, голосом из кабины</span>
             <div class="ai-chat">
-              <div class="bub me voice"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Отметь смену двенадцатое октября, двенадцать часов, Карьер Восточный</span></div>
-              <div class="bub bot">Смена за 12 октября, 12 ч, Карьер Восточный, Shacman О 512 КХ. Фото путевого прикрепил.<br /><span class="ok"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Отправлено диспетчеру</span></div>
+              <div class="bub me voice"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Орди, отметь смену двенадцатое октября, двенадцать часов, Карьер Восточный</span></div>
+              <div class="bub bot"><span class="bub-name">Орди</span>Смена за 12 октября, 12 ч, Карьер Восточный, Shacman О 512 КХ. Фото путевого прикрепил.<br /><span class="ok"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Отправлено диспетчеру</span></div>
             </div>
           </div>
           <div class="ai-case">
             <span class="ai-who">Бухгалтер</span>
             <div class="ai-chat">
               <div class="bub me">Сколько осталось выплатить водителям?</div>
-              <div class="bub bot">Не выплачено 6 водителям на 98&nbsp;200&nbsp;₽. Больше всех — Гришину Олегу, 26&nbsp;500&nbsp;₽. Ведомость для 1С — в разделе «Бухгалтерия».</div>
+              <div class="bub bot"><span class="bub-name">Орди</span>Не выплачено 6 водителям на 98&nbsp;200&nbsp;₽. Больше всех — Гришину Олегу, 26&nbsp;500&nbsp;₽. Ведомость для 1С — в разделе «Бухгалтерия».</div>
             </div>
           </div>
           <div class="ai-case">
             <span class="ai-who">Владелец</span>
             <div class="ai-chat">
               <div class="bub me">Заблокируй топливную карту КамАЗа</div>
-              <div class="bub bot">Карта •••• 2209, КамАЗ Е 207 НТ. Заблокировать?<br /><span class="ok"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Заблокирована, запись в журнале</span></div>
+              <div class="bub bot"><span class="bub-name">Орди</span>Карта •••• 2209, КамАЗ Е 207 НТ. Заблокировать?<br /><span class="ok"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Заблокирована, запись в журнале</span></div>
             </div>
           </div>
         </div>
         <div class="ai-rules">
-          <span><b>Ничего не меняет сам</b> — только после вашей кнопки «Подтвердить»</span>
+          <span><b>Ничего не меняет без вас</b> — только после вашей кнопки «Подтвердить»</span>
           <span><b>Видит то же, что и вы</b> — водитель не узнает чужую зарплату</span>
-          <span><b>Попробуйте в демо</b> — кнопка «Помощник» на любом экране</span>
+          <span><b>Попробуйте в демо</b> — кнопка «Спросить Орди» на любом экране</span>
         </div>
       </div>
     </section>
@@ -493,7 +498,7 @@
               <li>Ремонты цепочкой: водитель, механик, снабжение</li>
               <li>Деньги по объектам</li>
               <li>Техника, ТО, топливные карты</li>
-              <li>Помощник Ordius для каждой роли, с голосовым вводом</li>
+              <li>ИИ-помощник Орди для каждой роли, с голосовым вводом</li>
               <li>Все 7 ролей, без ограничения пользователей</li>
             </ul>
             <a class="btn btn-ghost" href="demo/#owner/overview">Посмотреть в демо</a>
@@ -530,7 +535,7 @@
           <details><summary>Как платим водителям — по часам, а у нас рейсы и тонны</summary><p>Ставки бывают за час, смену, рейс и тонно-километр, их можно сочетать с окладом и коэффициентами за ночь, праздники и переработку. Ставку можно привязать к водителю, машине или объекту.</p></details>
           <details><summary>Сколько времени займёт запуск?</summary><p>Обычно один-два рабочих дня. Присылаете табель и список техники в любом виде, мы переносим их сами. Водителям отправляем ссылку и код компании.</p></details>
           <details><summary>Что если водитель работает в двух компаниях?</summary><p>Один вход на обе. Смены и заработок у каждой компании свои и друг другу не видны.</p></details>
-          <details><summary>Помощник может ошибиться в данных?</summary><p>Помощник не считает зарплату сам и не придумывает цифры — он берёт их из Ordius. Любое изменение он сначала показывает карточкой, и в систему оно попадает только после вашей кнопки «Подтвердить».</p></details>
+          <details><summary>ИИ-помощник может ошибиться в данных?</summary><p>Орди не считает зарплату сам и не придумывает цифры — он берёт их из Ordius. Любое изменение он сначала показывает карточкой, и в систему оно попадает только после вашей кнопки «Подтвердить».</p></details>
           <details><summary>Можно ли выгрузить данные для бухгалтерии?</summary><p>Да, табель и расчёт зарплаты выгружаются в Excel. Из него бухгалтер переносит данные в 1С.</p></details>
         </div>
       </div>

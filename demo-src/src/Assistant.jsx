@@ -32,13 +32,13 @@ const VOICE_EXAMPLE = {
 };
 
 const GREET = {
-  driver: 'Здравствуйте, Дмитрий. Помогу отметить смену, сообщить о поломке или разобраться с зарплатой. Можно сказать голосом.',
-  mechanic: 'Здравствуйте, Павел. Покажу ваши заявки и подскажу, как провести ремонт по шагам.',
-  supply: 'Здравствуйте, Евгений. Покажу, что нужно закупить и что ждёт согласования.',
-  accountant: 'Здравствуйте, Наталья. Подскажу, где ведомость и реестр, посчитаю, сколько осталось выплатить.',
-  owner: 'Здравствуйте, Игорь Петрович. Расскажу, что ждёт вашего решения, и внесу изменения — после вашего подтверждения.',
-  dispatcher: 'Здравствуйте, Татьяна. Помогу с табелем, ремонтами и задачами водителям.',
-  customer: 'Здравствуйте, Анна. Подскажу, как проверить и подтвердить смены подрядчика.'
+  driver: 'Здравствуйте, Дмитрий. Я Орди, ИИ-помощник Ordius. Помогу отметить смену, сообщить о поломке или разобраться с зарплатой. Можно сказать голосом.',
+  mechanic: 'Здравствуйте, Павел. Я Орди, ИИ-помощник Ordius. Покажу ваши заявки и подскажу, как провести ремонт по шагам.',
+  supply: 'Здравствуйте, Евгений. Я Орди, ИИ-помощник Ordius. Покажу, что нужно закупить и что ждёт согласования.',
+  accountant: 'Здравствуйте, Наталья. Я Орди, ИИ-помощник Ordius. Подскажу, где ведомость и реестр, посчитаю, сколько осталось выплатить.',
+  owner: 'Здравствуйте, Игорь Петрович. Я Орди, ИИ-помощник Ordius. Расскажу, что ждёт вашего решения, и внесу изменения — после вашего подтверждения.',
+  dispatcher: 'Здравствуйте, Татьяна. Я Орди, ИИ-помощник Ordius. Помогу с табелем, ремонтами и задачами водителям.',
+  customer: 'Здравствуйте, Анна. Я Орди, ИИ-помощник Ordius. Подскажу, как проверить и подтвердить смены подрядчика.'
 };
 
 const NUMW = { один: 1, одну: 1, первое: 1, первого: 1, два: 2, две: 2, второе: 2, второго: 2, три: 3, третье: 3, третьего: 3, четыре: 4, четвертое: 4, четвертого: 4, пять: 5, пятое: 5, пятого: 5, шесть: 6, шестое: 6, шестого: 6, семь: 7, седьмое: 7, седьмого: 7, восемь: 8, восьмое: 8, восьмого: 8, девять: 9, девятое: 9, девятого: 9, десять: 10, десятое: 10, десятого: 10, одиннадцать: 11, одиннадцатое: 11, одиннадцатого: 11, двенадцать: 12, двенадцатое: 12, двенадцатого: 12, тринадцать: 13, тринадцатое: 13, тринадцатого: 13, четырнадцать: 14, четырнадцатое: 14, четырнадцатого: 14 };
@@ -58,11 +58,12 @@ const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 &
 function unitTitle(state, id) { const u = state.units.find(x => x.id === id); return u ? `${u.name} ${u.plate}` : ''; }
 
 // ---------- ответы ----------
-function answer(raw, role, state) {
+function answer(raw0, role, state) {
+  const raw = raw0.replace(/^\s*орди[\s,!.:-]*/i, '');
   const t = norm(raw);
 
-  if (has(t, 'что ты умеешь', 'что умеешь', 'помощь', 'привет', 'здравств')) {
-    return { text: 'Я отвечаю на вопросы по Ordius, показываю цифры из системы и вношу изменения. Любое изменение — только после вашей кнопки «Подтвердить». Вот что можно спросить:', chips: true };
+  if (has(t, 'что ты умеешь', 'что умеешь', 'помощь', 'привет', 'здравств', 'кто ты')) {
+    return { text: 'Я Орди, ИИ-помощник Ordius. Отвечаю на вопросы, показываю цифры из системы и вношу изменения. Любое изменение — только после вашей кнопки «Подтвердить». Вот что можно спросить:', chips: true };
   }
 
   // ===== Водитель =====
@@ -86,7 +87,7 @@ function answer(raw, role, state) {
           rows: [['Дата', `${dayNum(date)} октября`], ['Объект', objName(obj)], ['Часы', `${hours} ч${hours > 12 ? ` (переработка ${hours - 12} ч)` : ''}`], ['Техника', unitTitle(state, 'u1')], ['Путевой лист', 'фото прикреплено']],
           run: s => {
             s.shifts.push({ id: 's' + (s.nextId++), date, driverId: ME, unitId: 'u1', objectId: obj, hours, status: 'pending', photo: true });
-            s.log.unshift({ t: nowLabel().slice(6), who: 'Ковалёв Д.', what: `Отметил смену за ${dayNum(date)}.10, ${hours} ч (через помощника)` });
+            s.log.unshift({ t: nowLabel().slice(6), who: 'Ковалёв Д.', what: `Отметил смену за ${dayNum(date)}.10, ${hours} ч (через Орди)` });
           },
           done: 'Смена отправлена диспетчеру. Как только её подтвердят, она попадёт в расчёт зарплаты.',
           toast: 'Смена отправлена на подтверждение',
@@ -180,7 +181,7 @@ function answer(raw, role, state) {
         action: {
           title: 'Выплата водителю',
           rows: [['Водитель', d.name], ['Начислено', fmt(p.earned)], ['Аванс', fmt(p.advance)], ['Удержано', fmt(p.held)], ['К выплате', fmt(p.left)]],
-          run: s => { s.paid[d.id] = true; addLog(s, role, `Выплата ${d.name}: ${fmt(p.left)} (через помощника)`); },
+          run: s => { s.paid[d.id] = true; addLog(s, role, `Выплата ${d.name}: ${fmt(p.left)} (через Орди)`); },
           done: `${d.name}: выплата ${fmt(p.left)} отмечена.`,
           toast: 'Выплата отмечена',
           link: { label: 'Открыть бухгалтерию', screen: 'accounting' }
@@ -205,7 +206,7 @@ function answer(raw, role, state) {
         action: {
           title: 'Подтвердить смены',
           rows: pend.map(s => [DRIVERS.find(d => d.id === s.driverId).name, `${dayNum(s.date)}.10 · ${s.hours} ч · ${objName(s.objectId)}`]),
-          run: s => { s.shifts.forEach(x => { if (x.status === 'pending') x.status = 'confirmed'; }); addLog(s, role, `Подтвердил ${pend.length} смен (через помощника)`); },
+          run: s => { s.shifts.forEach(x => { if (x.status === 'pending') x.status = 'confirmed'; }); addLog(s, role, `Подтвердил ${pend.length} смен (через Орди)`); },
           done: 'Смены подтверждены. Зарплата и выручка по объектам пересчитались.',
           toast: 'Смены подтверждены',
           link: { label: 'Открыть табель', screen: 'tabel' }
@@ -265,7 +266,7 @@ function answer(raw, role, state) {
         action: {
           title: 'Блокировка топливной карты',
           rows: [['Карта', `•••• ${c.number.slice(-4)} · ${c.provider}`], ['Техника', unitTitle(state, uid)], ['Заправлено в октябре', `${c.spent.toLocaleString('ru-RU')} л`]],
-          run: s => { s.cards.find(x => x.id === c.id).status = 'blocked'; addLog(s, role, `Заблокировал топливную карту •••• ${c.number.slice(-4)} (через помощника)`); },
+          run: s => { s.cards.find(x => x.id === c.id).status = 'blocked'; addLog(s, role, `Заблокировал топливную карту •••• ${c.number.slice(-4)} (через Орди)`); },
           done: 'Карта заблокирована, запись в журнале сделана.',
           toast: 'Карта заблокирована',
           link: { label: 'Открыть технику', screen: 'fleet' }
@@ -283,7 +284,7 @@ function answer(raw, role, state) {
     }
   }
 
-  return { text: 'В демо я понимаю вопросы из подсказок ниже. В рабочей версии помощник работает на нейросети и поймёт любую формулировку — так, как вы говорите.', chips: true };
+  return { text: 'В демо я понимаю вопросы из подсказок ниже. В рабочей версии Орди работает на нейросети и поймёт любую формулировку — так, как вы говорите.', chips: true };
 }
 
 // ---------- интерфейс ----------
@@ -314,7 +315,7 @@ function ActionCard({ a, onConfirm, onCancel, state: st }) {
 // Кнопка помощника внутри телефонных экранов (вместо плавающей кнопки)
 export function AssistantButton() {
   return (
-    <button type="button" className="as-inline" onClick={() => window.dispatchEvent(new Event('ordius:assistant'))} aria-label="Открыть помощника Ordius" title="Помощник">
+    <button type="button" className="as-inline" onClick={() => window.dispatchEvent(new Event('ordius:assistant'))} aria-label="Открыть ИИ-помощника Орди" title="Спросить Орди">
       <Sparkle size={20} />
     </button>
   );
@@ -385,16 +386,16 @@ export default function Assistant({ role, go, phone }) {
   return (
     <>
       {!open && !phone && (
-        <button type="button" className="as-fab" onClick={() => setOpen(true)} aria-label="Открыть помощника Ordius">
-          <Sparkle /> <span>Помощник</span>
+        <button type="button" className="as-fab" onClick={() => setOpen(true)} aria-label="Открыть ИИ-помощника Орди">
+          <Sparkle /> <span>Спросить Орди</span>
         </button>
       )}
       {open && (
-        <section className="as-panel" role="dialog" aria-label="Помощник Ordius">
+        <section className="as-panel" role="dialog" aria-label="ИИ-помощник Орди">
           <header className="as-head">
             <span className="as-ava"><Sparkle size={18} /></span>
-            <div className="as-head-t"><b>Помощник Ordius</b><span>{person.label} · {person.person}</span></div>
-            <button type="button" className="as-x" onClick={() => setOpen(false)} aria-label="Закрыть помощника"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+            <div className="as-head-t"><b>Орди <span className="as-ai">ИИ</span></b><span>Помощник Ordius · {person.label}: {person.person}</span></div>
+            <button type="button" className="as-x" onClick={() => setOpen(false)} aria-label="Закрыть Орди"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
           </header>
           <div className="as-list" ref={listRef} aria-live="polite">
             {msgs.map((m, i) => (
@@ -410,10 +411,10 @@ export default function Assistant({ role, go, phone }) {
           </div>
           <form className="as-input" onSubmit={e => { e.preventDefault(); send(); }}>
             <button type="button" className={'as-mic' + (listening ? ' on' : '')} onClick={voice} aria-label={listening ? 'Остановить запись' : 'Сказать голосом'} title="Сказать голосом"><Mic /></button>
-            <input value={text} onChange={e => setText(e.target.value)} placeholder={listening ? 'Слушаю…' : 'Спросите или попросите сделать'} aria-label="Сообщение помощнику" />
+            <input value={text} onChange={e => setText(e.target.value)} placeholder={listening ? 'Слушаю…' : 'Напишите или скажите Орди'} aria-label="Сообщение помощнику" />
             <button type="submit" className="as-send" disabled={!text.trim()} aria-label="Отправить"><Icon name="arrow" size={18} /></button>
           </form>
-          <p className="as-foot">Демо: понимает фразы из подсказок. Изменения — только после «Подтвердить».</p>
+          <p className="as-foot">Демо-версия Орди понимает фразы из подсказок. Изменения — только после «Подтвердить».</p>
         </section>
       )}
     </>
