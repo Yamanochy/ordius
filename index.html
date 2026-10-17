@@ -238,6 +238,10 @@
     footer { background: var(--graphite); color: var(--on-graphite-muted); font-size: 14px; border-top: 1px solid rgba(255,255,255,.08); }
     footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: center; justify-content: space-between; padding-top: 28px; padding-bottom: 28px; }
     footer img { height: 20px; width: auto; }
+    footer .wrap + .wrap { padding-top: 0; }
+    .foot-links { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+    .foot-links a { color: var(--on-graphite); text-decoration: none; text-underline-offset: 3px; }
+    .foot-links a:hover { text-decoration: underline; }
 
     [data-theme-img="dark"] { display: none !important; }
     @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) [data-theme-img="dark"] { display: block !important; } :root:not([data-theme="light"]) [data-theme-img="light"] { display: none !important; } }
@@ -617,6 +621,13 @@
   <footer>
     <div class="wrap">
       <img src="brand/ordius-lockup-on-dark.svg" alt="Ordius" width="111" height="20" />
+      <nav class="foot-links" aria-label="Контакты и документы">
+        <a href="mailto:ordius.info@yandex.ru">ordius.info@yandex.ru</a>
+        <a data-contact href="#">Telegram</a>
+        <a href="privacy.html">Политика обработки персональных данных</a>
+      </nav>
+    </div>
+    <div class="wrap">
       <span>Ordius — ваш парк под контролем, от смены до выплаты. © 2026</span>
     </div>
   </footer>
