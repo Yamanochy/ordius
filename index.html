@@ -28,6 +28,7 @@
       --wrap: 1200px; --gutter: 24px;
     }
     @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+        color-scheme: dark;
         --surface-0: #0F1217; --surface-1: #171B21; --surface-2: #20252D;
         --ink: #ECEEF2; --ink-muted: #A7AEBA; --line: #2A3039; --line-strong: #3A414C;
         --signal: #4B7FFF; --signal-text: #8DB0FF; --signal-soft: #1A2744;
@@ -203,6 +204,60 @@
     .plan-steps b { font-weight: 600; font-size: 18px; line-height: 26px; }
     .plan-steps span { color: var(--ink-muted); }
 
+    /* Pilot form */
+    .launch-grid { grid-template-areas: "copy form" "steps form"; grid-template-rows: auto 1fr; row-gap: 56px; }
+    .lead-card [hidden] { display: none !important; }
+    .launch-copy { grid-area: copy; }
+    .launch .plan-steps { grid-area: steps; }
+    .no-form .launch-grid { grid-template-areas: "copy steps"; }
+    .no-form [data-form] { display: none !important; }
+    body:not(.no-form) [data-noform] { display: none !important; }
+    .lead-card { grid-area: form; background: var(--surface-0); border: 1px solid var(--line); border-radius: 20px; padding: 32px; }
+    .lead-card h3 { font-size: 24px; line-height: 30px; }
+    .form-intro { color: var(--ink-muted); margin-top: 6px; }
+    .pf { display: flex; flex-direction: column; gap: 18px; margin-top: 24px; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+    .field > label, .field legend { font-weight: 600; font-size: 15px; line-height: 20px; padding: 0; margin-bottom: 6px; }
+    .field > label { margin-bottom: 0; }
+    .opt { font-weight: 400; color: var(--ink-muted); }
+    .pf input[type="text"], .pf input[type="tel"], .pf select, .pf textarea { width: 100%; height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--surface-1); color: var(--ink); font: 400 16px/22px var(--font-sans); }
+    .pf textarea { height: auto; min-height: 84px; padding: 12px 14px; resize: vertical; }
+    .pf select { appearance: none; -webkit-appearance: none; padding-right: 40px; cursor: pointer; }
+    .pf input::placeholder, .pf textarea::placeholder { color: var(--ink-muted); opacity: .7; }
+    .pf input:focus-visible, .pf select:focus-visible, .pf textarea:focus-visible { outline: 2px solid var(--signal); outline-offset: 0; border-color: var(--signal); border-radius: 10px; }
+    .select-wrap { position: relative; }
+    .select-wrap::after { content: ""; position: absolute; right: 18px; top: 50%; width: 8px; height: 8px; border-right: 2px solid var(--ink-muted); border-bottom: 2px solid var(--ink-muted); transform: translateY(-70%) rotate(45deg); pointer-events: none; }
+    .seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .seg label { position: relative; display: block; }
+    .seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+    .seg span { display: flex; align-items: center; justify-content: center; height: 44px; padding: 0 6px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--surface-1); font-size: 15px; font-weight: 500; white-space: nowrap; }
+    .seg input:checked + span { border-color: var(--signal); background: var(--signal-soft); color: var(--signal-text); font-weight: 600; }
+    .seg input:focus-visible + span { outline: 2px solid var(--signal); outline-offset: 2px; }
+    .err { display: none; color: var(--danger); font-size: 14px; line-height: 20px; }
+    .has-err .err { display: block; }
+    .has-err input[type="text"], .has-err input[type="tel"], .has-err select, .has-err .seg span { border-color: var(--danger); }
+    .consent { display: flex; gap: 12px; align-items: flex-start; font-size: 15px; line-height: 22px; cursor: pointer; }
+    .field > label.consent { font-weight: 400; line-height: 22px; }
+    .consent input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--signal); cursor: pointer; }
+    .consent a, .form-legal a, .form-status a { color: var(--signal-text); }
+    .hp { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+    .pf .btn { width: 100%; }
+    .pf .btn[disabled] { opacity: .65; cursor: progress; }
+    .form-legal { font-size: 14px; line-height: 20px; color: var(--ink-muted); }
+    .form-status:empty { display: none; }
+    .form-status { font-size: 15px; line-height: 22px; padding: 12px 14px; border-radius: 10px; background: var(--danger-soft); color: var(--ink); }
+    .form-done { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
+    .form-done:focus { outline: none; }
+    .done-icon { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--success-soft); color: var(--success); }
+    .done-ref { font-family: var(--font-mono); font-weight: 600; color: var(--signal-text); }
+    .form-done p { color: var(--ink-muted); }
+    @media (max-width: 1040px) {
+      .launch-grid { grid-template-areas: "copy" "form" "steps"; grid-template-rows: none; }
+      .no-form .launch-grid { grid-template-areas: "copy" "steps"; }
+    }
+    @media (max-width: 760px) { .lead-card { padding: 24px; } }
+    @media (max-width: 480px) { .seg { grid-template-columns: repeat(2, minmax(0, 1fr)); } .lead-card { padding: 20px; } }
+
     /* Pricing */
     .plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
     .plan { background: var(--surface-1); border: 1px solid var(--line); border-radius: 20px; padding: 36px; display: flex; flex-direction: column; gap: 20px; }
@@ -289,6 +344,7 @@
 /* Тема, выбранная вручную */
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] {
+        color-scheme: dark;
         --surface-0: #0F1217; --surface-1: #171B21; --surface-2: #20252D;
         --ink: #ECEEF2; --ink-muted: #A7AEBA; --line: #2A3039; --line-strong: #3A414C;
         --signal: #4B7FFF; --signal-text: #8DB0FF; --signal-soft: #1A2744;
@@ -296,7 +352,7 @@
       }
   </style>
 </head>
-<body class="no-contact">
+<body class="no-contact no-form">
   <div class="announce">
     <div class="wrap"><span><b>Запуск Ordius — 1 декабря 2026.</b> Идёт запись на пилот.</span><a href="#pilot">Записаться</a></div>
   </div>
@@ -529,12 +585,77 @@
               <li>Ваши пожелания по функциям — в приоритете</li>
             </ul>
             <div class="hero-actions">
-              <a class="btn btn-primary" data-contact href="#">Записаться на пилот</a>
+              <a class="btn btn-primary" data-contact data-noform href="#">Записаться на пилот</a>
               <a class="btn btn-ghost" href="demo/">Сначала посмотреть демо</a>
             </div>
           </div>
+          <div class="lead-card" data-form>
+            <form class="pf" id="pilot-form" novalidate aria-labelledby="pf-title">
+              <div>
+                <h3 id="pf-title">Заявка на пилот</h3>
+                <p class="form-intro">Перезвоним в тот же день. Разговор займёт около 20 минут.</p>
+              </div>
+              <div class="field" data-f="name">
+                <label for="pf-name">Как к вам обращаться</label>
+                <input type="text" id="pf-name" name="name" autocomplete="name" maxlength="80" required aria-describedby="pf-name-err" />
+                <p class="err" id="pf-name-err">Укажите имя</p>
+              </div>
+              <div class="field" data-f="phone">
+                <label for="pf-phone">Телефон</label>
+                <input type="tel" id="pf-phone" name="phone" autocomplete="tel" inputmode="tel" placeholder="+7 900 000-00-00" maxlength="25" required aria-describedby="pf-phone-err" />
+                <p class="err" id="pf-phone-err">Проверьте номер: нужно 10–11 цифр</p>
+              </div>
+              <div class="field">
+                <label for="pf-company">Компания <span class="opt">— необязательно</span></label>
+                <input type="text" id="pf-company" name="company" autocomplete="organization" maxlength="120" />
+              </div>
+              <fieldset class="field" data-f="fleet" aria-describedby="pf-fleet-err">
+                <legend>Сколько у вас единиц техники</legend>
+                <div class="seg">
+                  <label><input type="radio" name="fleet" value="a" /><span>1–5</span></label>
+                  <label><input type="radio" name="fleet" value="b" /><span>6–15</span></label>
+                  <label><input type="radio" name="fleet" value="c" /><span>16–30</span></label>
+                  <label><input type="radio" name="fleet" value="d" /><span>больше 30</span></label>
+                </div>
+                <p class="err" id="pf-fleet-err">Выберите вариант</p>
+              </fieldset>
+              <div class="field" data-f="method">
+                <label for="pf-method">Как сейчас ведёте учёт смен и зарплаты</label>
+                <div class="select-wrap">
+                  <select id="pf-method" name="method" required aria-describedby="pf-method-err">
+                    <option value="">Выберите</option>
+                    <option value="n">В тетради или журнале</option>
+                    <option value="x">В Excel</option>
+                    <option value="w">В мессенджере</option>
+                    <option value="o">В 1С</option>
+                    <option value="p">В другой программе</option>
+                  </select>
+                </div>
+                <p class="err" id="pf-method-err">Выберите вариант</p>
+              </div>
+              <div class="field">
+                <label for="pf-comment">Вопрос или удобное время для звонка <span class="opt">— необязательно</span></label>
+                <textarea id="pf-comment" name="comment" rows="3" maxlength="1000"></textarea>
+              </div>
+              <div class="hp" aria-hidden="true"><label for="pf-website">Сайт</label><input type="text" id="pf-website" name="website" tabindex="-1" autocomplete="off" /></div>
+              <div class="field" data-f="consent">
+                <label class="consent"><input type="checkbox" name="consent" value="yes" required aria-describedby="pf-consent-err" /><span>Даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a></span></label>
+                <p class="err" id="pf-consent-err">Без согласия мы не сможем принять заявку</p>
+              </div>
+              <p class="form-status" id="pf-status" role="alert"></p>
+              <button class="btn btn-primary" type="submit">Отправить заявку</button>
+              <p class="form-legal">Данные хранятся в России и нужны только для связи с вами. Подробнее — в <a href="privacy.html">политике</a>.</p>
+            </form>
+            <div class="form-done" id="pilot-done" hidden tabindex="-1">
+              <span class="done-icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+              <h3>Заявка принята</h3>
+              <p class="done-ref" id="pilot-ref" hidden></p>
+              <p>Александр перезвонит вам сегодня или в ближайший рабочий день и расскажет, как пройдёт пилот. А пока можно посмотреть демо — там все кнопки работают.</p>
+              <a class="btn btn-ghost" href="demo/">Открыть демо</a>
+            </div>
+          </div>
           <ol class="plan-steps" aria-label="Как пройдёт запуск">
-            <li><b>Заявка</b><span>Пишете нам в Telegram. Отвечаем в тот же день.</span></li>
+            <li><b>Заявка</b><span data-form>Оставляете заявку в форме на этой странице. Перезваниваем в тот же день.</span><span data-noform>Пишете нам в Telegram. Отвечаем в тот же день.</span></li>
             <li><b>Разговор на 20 минут</b><span>Как у вас сейчас ведутся смены и зарплата, сколько машин и объектов.</span></li>
             <li><b>Ноябрь — подготовка</b><span>Переносим данные, настраиваем ставки, проверяем расчёт на ваших цифрах.</span></li>
             <li><b>1 декабря — старт</b><span>Водители отмечают смены в телефоне, вы видите всё в Ordius.</span></li>
@@ -612,7 +733,7 @@
         <p class="lead">В демо можно побыть владельцем, диспетчером, механиком, бухгалтером и водителем. Переключение ролей — в верхней полосе.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="demo/">Открыть демо</a>
-          <a class="btn btn-line" data-contact href="#">Записаться на пилот в Telegram</a>
+          <a class="btn btn-line" href="#pilot">Записаться на пилот</a>
         </div>
       </div>
     </section>
@@ -654,6 +775,84 @@
       document.body.classList.remove('no-contact');
       document.querySelectorAll('[data-contact]').forEach(function (a) { a.href = CONTACT; a.target = '_blank'; a.rel = 'noopener'; });
     }
+
+    // Форма записи на пилот. Адрес облачной функции Yandex Cloud (ссылка для вызова).
+    // Пока пусто — формы нет, вместо неё кнопка Telegram.
+    var FORM_ENDPOINT = '';
+    (function () {
+      try {
+        var dev = new URLSearchParams(location.search).get('form_endpoint');
+        if (dev && /^http:\/\/(localhost|127\.0\.0\.1):\d+\/?$/.test(dev)) FORM_ENDPOINT = dev;
+      } catch (e) {}
+      if (!FORM_ENDPOINT || !window.fetch) return;
+      document.body.classList.remove('no-form');
+      var form = document.getElementById('pilot-form'), done = document.getElementById('pilot-done');
+      var btn = form.querySelector('button[type="submit"]'), status = document.getElementById('pf-status');
+      var clock = function () { return window.performance && performance.now ? performance.now() : Date.now(); };
+      var t0 = clock(), busy = false;
+      var el = function (n) { return form.elements.namedItem(n); };
+      var digits = function (s) { return String(s || '').replace(/\D/g, ''); };
+      var checks = {
+        name: function () { return el('name').value.trim().length >= 2; },
+        phone: function () { var d = digits(el('phone').value); return d.length >= 10 && d.length <= 15; },
+        fleet: function () { return !!el('fleet').value; },
+        method: function () { return !!el('method').value; },
+        consent: function () { return el('consent').checked; }
+      };
+      function mark(f, bad) {
+        var box = form.querySelector('[data-f="' + f + '"]');
+        if (!box) return;
+        box.classList.toggle('has-err', bad);
+        box.querySelectorAll('input, select').forEach(function (i) { if (bad) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid'); });
+      }
+      function focusField(f) {
+        var t = form.querySelector('[data-f="' + f + '"] input, [data-f="' + f + '"] select');
+        if (t) t.focus();
+      }
+      Object.keys(checks).forEach(function (f) {
+        var box = form.querySelector('[data-f="' + f + '"]');
+        var recheck = function () { if (box.classList.contains('has-err')) mark(f, !checks[f]()); };
+        box.addEventListener('input', recheck);
+        box.addEventListener('change', recheck);
+      });
+      function fail() {
+        status.innerHTML = 'Не получилось отправить заявку. Попробуйте ещё раз или напишите нам: <a href="https://t.me/Ordius_app" target="_blank" rel="noopener">Telegram @Ordius_app</a> или <a href="mailto:ordius.info@yandex.ru">ordius.info@yandex.ru</a>.';
+      }
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (busy) return;
+        status.textContent = '';
+        var bad = Object.keys(checks).filter(function (f) { var b = !checks[f](); mark(f, b); return b; });
+        if (bad.length) { status.textContent = 'Проверьте отмеченные поля.'; focusField(bad[0]); return; }
+        var body = new URLSearchParams();
+        ['name', 'phone', 'company', 'method', 'comment', 'website'].forEach(function (n) { body.append(n, el(n).value); });
+        body.append('fleet', el('fleet').value);
+        body.append('consent', 'yes');
+        body.append('elapsed', String(Math.round(clock() - t0)));
+        busy = true; btn.disabled = true; btn.textContent = 'Отправляем…';
+        var ctrl = window.AbortController ? new AbortController() : null;
+        var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
+        fetch(FORM_ENDPOINT, { method: 'POST', body: body, signal: ctrl ? ctrl.signal : undefined })
+          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, j: j }; }); })
+          .then(function (res) {
+            if (res.j && res.j.ok) {
+              var ref = document.getElementById('pilot-ref');
+              if (res.j.ref) { ref.textContent = 'Номер заявки: #' + res.j.ref; ref.hidden = false; }
+              form.hidden = true; done.hidden = false; done.focus();
+              return;
+            }
+            if (res.status === 400 && res.j && res.j.fields) {
+              res.j.fields.forEach(function (f) { mark(f, true); });
+              status.textContent = 'Проверьте отмеченные поля.';
+              focusField(res.j.fields[0]);
+              return;
+            }
+            fail();
+          })
+          .catch(fail)
+          .then(function () { clearTimeout(timer); busy = false; btn.disabled = false; btn.textContent = 'Отправить заявку'; });
+      });
+    })();
     var lb = document.getElementById('lb'), lbImg = document.getElementById('lb-img');
     document.querySelectorAll('.zoom').forEach(function (b) {
       b.addEventListener('click', function () {
