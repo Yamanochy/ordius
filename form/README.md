@@ -59,6 +59,13 @@ ordius.info@yandex.ru. Один файл `index.js`, без сторонних �
 1. Сервис «Identity and Access Management» → «Создать сервисный аккаунт» → имя `ordius-form` → «Создать».
 2. Роль назначается отдельно: вернуться в каталог `default` → вкладка «Права доступа» → «Настроить доступ» →
    раздел сервисных аккаунтов → выбрать `ordius-form` → «Добавить роль» → **`storage.uploader`** → «Сохранить».
+   Нужны «Права доступа» именно **каталога**, не самого сервисного аккаунта (адрес вида `/service-account/…/resource-acl` — не та страница).
+3. Если консоль выдаёт ошибку — то же через «Cloud Shell» (меню слева):
+   ```
+   yc iam service-account get ordius-form
+   yc resource-manager folder add-access-binding default --role storage.uploader --service-account-id <id из первой команды>
+   yc resource-manager folder list-access-bindings default
+   ```
 
 ### 5. Функция
 1. Сервис «Cloud Functions» → «Создать функцию» → имя `ordius-form` → «Создать».
