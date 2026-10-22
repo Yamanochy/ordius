@@ -7,6 +7,14 @@ ordius.info@yandex.ru. Один файл `index.js`, без сторонних �
 Пока в `index.html` не задан адрес функции (`FORM_ENDPOINT`), формы на сайте не видно —
 вместо неё кнопка «Записаться на пилот» ведёт в Telegram. Сайт не ломается.
 
+## Текущее развёртывание (22.10.2026)
+
+- Функция `ordius-form` (ID `d4elmq1rdrc7toicisor`), каталог `default`, Node.js 22, 15 с, 128 МБ.
+- Ссылка для вызова: `https://functions.yandexcloud.net/d4elmq1rdrc7toicisor` — публичная.
+- Бакет `ordius-leads-48213`, сервисный аккаунт `ordius-form` с ролью `storage.uploader` на каталог.
+- Проверено тестовыми заявками: запись в бакет и письмо на ordius.info@yandex.ru работают.
+- На сайте ещё **не включена**: `FORM_ENDPOINT` вписывается после подачи уведомления в Роскомнадзор.
+
 ## Что делает функция
 
 - Принимает заявки только со страниц ordius.ru (проверка Origin/Referer).
