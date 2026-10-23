@@ -89,6 +89,14 @@ bad=$(mktemp -d); cp "$ORDIUS_ETC"/* "$bad/"; sed -i 's/^S3_BUCKET=.*/S3_BUCKET=
 check "s3-setup: чужой бакет — ошибка" "! ORDIUS_ETC='$bad' ordius-s3-setup >/dev/null 2>&1"
 rm -rf "$bad"
 
+# Регион не указан, стиль адресации не подходит — скрипт должен подобрать рабочие и записать их.
+det=$(mktemp -d); cp "$ORDIUS_ETC"/* "$det/"
+sed -i -e 's/^S3_LOOKUP=.*/S3_LOOKUP=dns/' -e 's/^S3_REGION=.*/S3_REGION=/' "$det/ordius.conf"
+check "s3-setup: подбирает стиль адресации и регион" "ORDIUS_ETC='$det' ordius-s3-setup >/dev/null 2>&1"
+# (для адреса-IP boto сам переходит на path-адресацию, поэтому стиль может остаться dns)
+check "s3-setup: подобранное записано в ordius.conf" "grep -qx 'S3_REGION=us-east-1' '$det/ordius.conf' && grep -qE '^S3_LOOKUP=(dns|path)$' '$det/ordius.conf' && grep -qx 'S3_BUCKET=ordius-backup-test' '$det/ordius.conf'"
+rm -rf "$det"
+
 # shellcheck source=../lib/common.sh
 source "$HERE/lib/common.sh"
 load_backup_env

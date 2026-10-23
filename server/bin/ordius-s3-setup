@@ -2,7 +2,8 @@
 """Проверка и настройка бакета копий Ordius в Selectel S3.
 
 Читает /etc/ordius/ordius.conf и /etc/ordius/backup.env. Делает:
-  1. проверяет, что ключи подходят и бакет доступен;
+  1. проверяет, что ключи подходят и в бакет можно писать; если регион подписи или
+     стиль адресации в настройках не подошли — подбирает рабочие и записывает в ordius.conf;
   2. включает версионирование, если оно выключено;
   3. ставит правило: прежние версии файлов удаляются через 7 дней,
      недокачанные части — через 2 дня.
@@ -10,11 +11,12 @@
 версионирование или правила, скрипт предупреждает, но не падает.
 """
 import os
+import re
 import sys
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError, EndpointConnectionError
+from botocore.exceptions import BotoCoreError, ClientError
 
 ETC = os.environ.get("ORDIUS_ETC", "/etc/ordius")
 NONCURRENT_DAYS = 7
@@ -32,33 +34,84 @@ def read_env(path):
     return values
 
 
-def main():
-    cfg = read_env(os.path.join(ETC, "ordius.conf"))
-    cfg.update(read_env(os.path.join(ETC, "backup.env")))
-    bucket = cfg["S3_BUCKET"]
-    scheme = cfg.get("S3_SCHEME", "https")
-    lookup = cfg.get("S3_LOOKUP", "dns")
-    s3 = boto3.client(
+def make_client(cfg, region, lookup):
+    return boto3.client(
         "s3",
-        endpoint_url=f"{scheme}://{cfg['S3_ENDPOINT']}",
-        region_name=cfg.get("S3_REGION") or "us-east-1",
+        endpoint_url=f"{cfg.get('S3_SCHEME', 'https')}://{cfg['S3_ENDPOINT']}",
+        region_name=region,
         aws_access_key_id=cfg["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=cfg["AWS_SECRET_ACCESS_KEY"],
         config=Config(
             s3={"addressing_style": "virtual" if lookup == "dns" else "path"},
-            retries={"max_attempts": 3},
+            retries={"max_attempts": 2},
             connect_timeout=10,
             read_timeout=30,
         ),
     )
 
-    try:
-        s3.head_bucket(Bucket=bucket)
-    except (ClientError, EndpointConnectionError) as e:
-        print(f"ОШИБКА: нет доступа к бакету {bucket}: {e}", file=sys.stderr)
-        print("Проверьте имя бакета, пул и ключи (Access key / Secret key).", file=sys.stderr)
+
+def works(s3, bucket):
+    """Бакет виден, в него можно записать и из него удалить — всё, что нужно restic."""
+    s3.head_bucket(Bucket=bucket)
+    s3.put_object(Bucket=bucket, Key="ordius-probe", Body=b"ok")
+    s3.delete_object(Bucket=bucket, Key="ordius-probe")
+
+
+def candidates(cfg):
+    """Регион подписи и стиль адресации: сначала из настроек, потом типичные значения.
+    Провайдеры по-разному называют регион (Selectel — пул ru-1, у других ru1, us-east-1, default)."""
+    regions, lookups = [], []
+    host = cfg["S3_ENDPOINT"].split(":")[0]
+    m = re.search(r"\b(ru|kz|uz|gis)-?(\d+)\b", host)
+    for r in [cfg.get("S3_REGION"), m and f"{m.group(1)}-{m.group(2)}", m and f"{m.group(1)}{m.group(2)}",
+              "us-east-1", "default"]:
+        if r and r not in regions:
+            regions.append(r)
+    for lk in [cfg.get("S3_LOOKUP"), "dns", "path"]:
+        if lk and lk not in lookups:
+            lookups.append(lk)
+    return [(r, lk) for lk in lookups for r in regions]
+
+
+def save_conf(path, updates):
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    seen = set()
+    for i, line in enumerate(lines):
+        key = line.split("=", 1)[0].strip()
+        if key in updates:
+            lines[i] = f"{key}={updates[key]}"
+            seen.add(key)
+    lines += [f"{k}={v}" for k, v in updates.items() if k not in seen]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def main():
+    conf_path = os.path.join(ETC, "ordius.conf")
+    cfg = read_env(conf_path)
+    cfg.update(read_env(os.path.join(ETC, "backup.env")))
+    bucket = cfg["S3_BUCKET"]
+
+    s3 = None
+    last_error = None
+    for region, lookup in candidates(cfg):
+        client = make_client(cfg, region, lookup)
+        try:
+            works(client, bucket)
+        except (ClientError, BotoCoreError) as e:
+            last_error = e
+            continue
+        s3 = client
+        break
+    if s3 is None:
+        print(f"ОШИБКА: нет доступа к бакету {bucket}: {last_error}", file=sys.stderr)
+        print("Проверьте адрес хранилища, имя бакета и ключи (Access key / Secret key).", file=sys.stderr)
         return 1
-    print(f"бакет {bucket}: доступ есть")
+    print(f"бакет {bucket}: доступ есть, запись и удаление работают (регион {region}, адресация {lookup})")
+    if (region, lookup) != (cfg.get("S3_REGION"), cfg.get("S3_LOOKUP")):
+        save_conf(conf_path, {"S3_REGION": region, "S3_LOOKUP": lookup})
+        print(f"настройки подключения записаны в {conf_path}")
 
     try:
         status = s3.get_bucket_versioning(Bucket=bucket).get("Status")

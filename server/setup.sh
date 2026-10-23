@@ -2,9 +2,11 @@
 # Ordius — настройка сервера с нуля (Ubuntu 24.04). Запуск от root.
 #
 # Новый сервер:
-#   bash setup.sh --domain app.ordius.ru --bucket ordius-backup-73915 --pool ru-1
+#   bash setup.sh --domain app.ordius.ru --endpoint s3.ru1.storage.beget.cloud --bucket ИМЯ_БАКЕТА
 # Новый сервер вместо пропавшего — восстановить данные из копии:
-#   bash setup.sh --domain app.ordius.ru --bucket ordius-backup-73915 --pool ru-1 --restore
+#   bash setup.sh --domain app.ordius.ru --endpoint s3.ru1.storage.beget.cloud --bucket ИМЯ_БАКЕТА --restore
+# Хранилище копий — любое S3-совместимое в России. Для Selectel можно вместо --endpoint указать --pool ru-7.
+# Регион подписи и стиль адресации скрипт подбирает сам (или --region).
 #
 # Повторный запуск безопасен: готовые шаги пропускаются, пароли и ключи не пересоздаются.
 set -Eeuo pipefail
@@ -18,7 +20,7 @@ ORDIUS_DATA=/var/lib/ordius
 ORDIUS_OPT=/opt/ordius
 REPO="$ORDIUS_OPT/repo"
 
-DOMAIN="" BUCKET="" POOL="" ENDPOINT="" RESTORE=0 BRANCH=main
+DOMAIN="" BUCKET="" POOL="" ENDPOINT="" REGION="" RESTORE=0 BRANCH=main
 ORIG_ARGS=("$@")
 
 say()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
@@ -27,7 +29,7 @@ warn() { printf '  \033[33m! %s\033[0m\n' "$*" >&2; }
 die()  { printf '\n\033[31mОШИБКА: %s\033[0m\n' "$*" >&2; exit 1; }
 trap 'die "сбой на строке $LINENO. Пришлите Claude последние строки вывода."' ERR
 
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
     --bucket)   BUCKET=${2:-}; shift 2 ;;
     --pool)     POOL=${2:-}; shift 2 ;;
     --endpoint) ENDPOINT=${2:-}; shift 2 ;;
+    --region)   REGION=${2:-}; shift 2 ;;
     --branch)   BRANCH=${2:-}; shift 2 ;;
     --restore)  RESTORE=1; shift ;;
     -h|--help)  usage 0 ;;
@@ -45,8 +48,12 @@ done
 [ "$(id -u)" = "0" ] || die "запустите от root"
 [[ "$DOMAIN" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "укажите --domain, например app.ordius.ru"
 [[ "$BUCKET" =~ ^[a-z0-9][a-z0-9.-]{2,62}$ ]] || die "укажите --bucket — имя бакета Selectel"
-[[ "$POOL" =~ ^[a-z]{2,4}-[0-9]+$ ]] || die "укажите --pool — пул Selectel, например ru-1"
-ENDPOINT=${ENDPOINT:-s3.${POOL}.storage.selcloud.ru}
+if [ -n "$POOL" ]; then
+  [[ "$POOL" =~ ^[a-z]{2,4}-[0-9]+$ ]] || die "--pool — пул Selectel, например ru-7"
+  ENDPOINT=${ENDPOINT:-s3.${POOL}.storage.selcloud.ru}
+  REGION=${REGION:-$POOL}
+fi
+[[ "$ENDPOINT" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || die "укажите --endpoint — адрес S3-хранилища копий, например s3.ru1.storage.beget.cloud"
 
 # shellcheck disable=SC1091
 . /etc/os-release
@@ -219,7 +226,7 @@ DOMAIN=$DOMAIN
 PB_VERSION=$(basename "$(readlink -f "$ORDIUS_OPT/pocketbase/pocketbase")" | sed 's/^pocketbase-//')
 S3_ENDPOINT=$ENDPOINT
 S3_BUCKET=$BUCKET
-S3_REGION=$POOL
+S3_REGION=$REGION
 S3_SCHEME=${ORDIUS_S3_SCHEME:-https}
 S3_LOOKUP=${ORDIUS_S3_LOOKUP:-dns}
 HEALTHCHECK_URL=$(grep -s '^HEALTHCHECK_URL=' "$ORDIUS_ETC/ordius.conf" | cut -d= -f2- || true)
@@ -245,9 +252,9 @@ systemctl enable ordius-pocketbase >/dev/null 2>&1
 ok "службы установлены, файлы приложения разложены"
 
 # ---------------------------------------------------------------------------
-say "9/11 Копии в Selectel S3 ($BUCKET, пул $POOL)"
+say "9/11 Копии в хранилище S3 ($ENDPOINT, бакет $BUCKET)"
 if [ ! -s "$ORDIUS_ETC/backup.env" ]; then
-  echo "  Вставьте ключи сервисного пользователя ordius-backup из менеджера паролей."
+  echo "  Вставьте Access key и Secret key хранилища копий (из панели хранилища или менеджера паролей)."
   echo "  При вставке символы не видны — это нормально. Вставка: правая кнопка мыши."
   ask_secret "Access key" ORDIUS_S3_ACCESS_KEY
   ask_secret "Secret key" ORDIUS_S3_SECRET_KEY
@@ -259,7 +266,7 @@ EOF
   umask 022
 fi
 chmod 600 "$ORDIUS_ETC/backup.env"
-/usr/local/sbin/ordius-s3-setup || { rm -f "$ORDIUS_ETC/backup.env"; die "нет доступа к бакету. Проверьте имя, пул и ключи и запустите скрипт ещё раз"; }
+/usr/local/sbin/ordius-s3-setup || { rm -f "$ORDIUS_ETC/backup.env"; die "нет доступа к бакету. Проверьте адрес, имя бакета и ключи и запустите скрипт ещё раз"; }
 
 new_restic_pass=0
 if [ ! -s "$ORDIUS_ETC/restic.pass" ]; then
@@ -287,8 +294,11 @@ elif r init >/tmp/ordius-restic.log 2>&1; then
   fi
 else
   rm -f "$ORDIUS_ETC/restic.pass"
-  tail -3 /tmp/ordius-restic.log >&2
-  die "в бакете уже есть копии с другим паролем. Если это переезд на новый сервер — запустите с --restore"
+  tail -5 /tmp/ordius-restic.log >&2
+  if grep -q 'already initialized' /tmp/ordius-restic.log; then
+    die "в бакете уже есть копии с другим паролем. Если это переезд на новый сервер — запустите с --restore"
+  fi
+  die "restic не смог создать хранилище копий (строки выше). Пришлите их Claude"
 fi
 unset ORDIUS_RESTIC_PASSWORD
 
