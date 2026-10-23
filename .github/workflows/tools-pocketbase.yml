@@ -1,0 +1,40 @@
+# Кладёт официальный релиз PocketBase (с проверкой контрольной суммы) в отдельную ветку
+# tools-pocketbase — для локальных проверок схемы и правил доступа без выхода в интернет.
+# Ветка main и сайт на GitHub Pages не затрагиваются.
+name: tools-pocketbase
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/tools-pocketbase.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    env:
+      PB_VERSION: "0.40.5"
+    steps:
+      - name: Скачать и проверить PocketBase
+        run: |
+          set -euo pipefail
+          base="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}"
+          zip="pocketbase_${PB_VERSION}_linux_amd64.zip"
+          curl -fsSL --retry 3 -O "$base/$zip"
+          curl -fsSL --retry 3 -O "$base/checksums.txt"
+          grep " ${zip}\$" checksums.txt | sha256sum -c
+          mkdir out
+          cp "$zip" checksums.txt out/
+          sha256sum "$zip" | tee out/SHA256
+      - name: Выложить в ветку tools-pocketbase
+        run: |
+          set -euo pipefail
+          cd out
+          git init -q -b tools-pocketbase
+          git add .
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" \
+            commit -qm "PocketBase ${PB_VERSION} для локальных проверок"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" tools-pocketbase
