@@ -18,7 +18,7 @@ done
 # --- 1. статический анализ -------------------------------------------------
 check "shellcheck: setup.sh, lib, bin" \
   "shellcheck -x -S warning '$HERE/setup.sh' '$HERE/lib/common.sh' $(printf "'%s' " "$HERE"/bin/ordius-backup "$HERE"/bin/ordius-maintain "$HERE"/bin/ordius-restore "$HERE"/bin/ordius-deploy "$HERE"/bin/ordius-pb-update "$HERE"/bin/ordius-status)"
-check "python: ordius-s3-setup компилируется" "python3 -m py_compile '$HERE/bin/ordius-s3-setup'"
+check "python: ordius-s3-setup компилируется" "python3 -c \"import ast,sys; ast.parse(open(sys.argv[1]).read())\" '$HERE/bin/ordius-s3-setup'"
 check "bash -n: все скрипты" "for f in '$HERE/setup.sh' '$HERE'/bin/ordius-backup '$HERE'/bin/ordius-maintain '$HERE'/bin/ordius-restore '$HERE'/bin/ordius-deploy '$HERE'/bin/ordius-pb-update '$HERE'/bin/ordius-status; do bash -n \"\$f\" || exit 1; done"
 check "systemd: служба PocketBase слушает только 127.0.0.1" "grep -q -- '--http=127.0.0.1:8090' '$HERE/systemd/ordius-pocketbase.service'"
 check "Caddy: панель администратора закрыта снаружи" "grep -q '@admin path /_ /_/\*' '$HERE/config/Caddyfile' && grep -q 'respond @admin 404' '$HERE/config/Caddyfile'"
