@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Выкладка новой версии Ordius из репозитория GitHub (ветка main).
+#   sudo ordius-deploy               — копия → обновление файлов → перезапуск → проверка
+#   sudo ordius-deploy --no-restart  — только разложить файлы (используется при установке)
+# Что раскладывается:
+#   backend/pb_migrations → /opt/ordius/pb_migrations  (схема базы, применяется при запуске)
+#   backend/pb_hooks      → /opt/ordius/pb_hooks       (серверная логика)
+#   app/dist              → /opt/ordius/pb_public      (собранное приложение, если есть)
+set -Eeuo pipefail
+# shellcheck source=../lib/common.sh
+source "${ORDIUS_LIB:-/usr/local/lib/ordius}/common.sh"
+
+REPO="$ORDIUS_OPT/repo"
+BRANCH=${ORDIUS_BRANCH:-main}
+SERVICE=${ORDIUS_PB_SERVICE:-ordius-pocketbase}
+restart=1
+[ "${1:-}" = "--no-restart" ] && restart=0
+
+[ -d "$REPO/.git" ] || die "нет клона репозитория в $REPO"
+
+git -C "$REPO" fetch --quiet origin "$BRANCH"
+before=$(git -C "$REPO" rev-parse HEAD)
+git -C "$REPO" reset --quiet --hard "origin/$BRANCH"
+after=$(git -C "$REPO" rev-parse HEAD)
+log "репозиторий: ${before:0:7} → ${after:0:7}"
+
+if [ "$restart" = "1" ] && [ -r "$ORDIUS_ETC/backup.env" ]; then
+  log "копия перед выкладкой"
+  ordius-backup || die "копия перед выкладкой не удалась — выкладка отменена"
+fi
+
+mkdir -p "$ORDIUS_OPT/pb_migrations" "$ORDIUS_OPT/pb_hooks" "$ORDIUS_OPT/pb_public"
+# Миграции не удаляем: уже применённые остаются в истории базы.
+[ -d "$REPO/backend/pb_migrations" ] && rsync -a "$REPO/backend/pb_migrations/" "$ORDIUS_OPT/pb_migrations/"
+# Хуки — ровно как в репозитории: удалённый там хук должен перестать работать и здесь.
+if [ -d "$REPO/backend/pb_hooks" ]; then
+  rsync -a --delete "$REPO/backend/pb_hooks/" "$ORDIUS_OPT/pb_hooks/"
+else
+  find "$ORDIUS_OPT/pb_hooks" -mindepth 1 -delete
+fi
+if [ -d "$REPO/app/dist" ]; then
+  rsync -a --delete "$REPO/app/dist/" "$ORDIUS_OPT/pb_public/"
+elif [ ! -e "$ORDIUS_OPT/pb_public/index.html" ]; then
+  cp "$REPO/server/config/placeholder.html" "$ORDIUS_OPT/pb_public/index.html"
+fi
+log "файлы разложены"
+
+[ "$restart" = "1" ] || exit 0
+
+systemctl restart "$SERVICE"
+for _ in $(seq 1 30); do
+  if curl -fsS -m 2 http://127.0.0.1:8090/api/health >/dev/null 2>&1; then
+    log "версия ${after:0:7} выложена, сервис отвечает"
+    exit 0
+  fi
+  sleep 1
+done
+die "сервис не отвечает после выкладки. Откат: sudo ordius-restore latest; журнал: journalctl -u $SERVICE -n 80"

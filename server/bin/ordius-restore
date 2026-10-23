@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Восстановление Ordius из копии в Selectel S3.
+#   sudo ordius-restore --list          — показать копии
+#   sudo ordius-restore latest          — восстановить последнюю
+#   sudo ordius-restore 1a2b3c4d        — восстановить конкретную (id из --list)
+# Текущие данные не удаляются: они переносятся в /var/lib/ordius/pb_data.before-restore-<время>.
+set -Eeuo pipefail
+# shellcheck source=../lib/common.sh
+source "${ORDIUS_LIB:-/usr/local/lib/ordius}/common.sh"
+load_backup_env
+
+SERVICE=${ORDIUS_PB_SERVICE:-ordius-pocketbase}
+NO_SYSTEMD=${ORDIUS_NO_SYSTEMD:-0}   # 1 — для проверок без systemd
+
+svc() { [ "$NO_SYSTEMD" = "1" ] || systemctl "$@" "$SERVICE"; }
+
+case "${1:-}" in
+  ""|-h|--help)
+    sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0 ;;
+  --list)
+    r snapshots --host "$ORDIUS_HOST" --tag "$ORDIUS_TAG"
+    exit 0 ;;
+esac
+
+snapshot=$1
+
+exec 9>"$ORDIUS_DATA/.backup.lock"
+flock -w 900 9 || die "идёт копирование — повторите через несколько минут"
+
+tmp=$(mktemp -d "$ORDIUS_DATA/restore.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
+log "скачиваю копию $snapshot…"
+r restore "$snapshot" --host "$ORDIUS_HOST" --tag "$ORDIUS_TAG" --target "$tmp"
+
+db="$tmp$SNAP_DIR/data.db"
+files="$tmp$PB_DATA/storage"
+key="$tmp$ORDIUS_ETC/pocketbase.env"
+db_ok "$db" || die "в копии нет целой базы — восстановление отменено, текущие данные не тронуты"
+
+log "останавливаю PocketBase"
+svc stop
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+if [ -d "$PB_DATA" ]; then
+  mv "$PB_DATA" "$ORDIUS_DATA/pb_data.before-restore-$stamp"
+  log "прежние данные сохранены в $ORDIUS_DATA/pb_data.before-restore-$stamp"
+fi
+mkdir -p "$PB_DATA"
+cp "$db" "$PB_DATA/data.db"
+if [ -d "$files" ]; then cp -a "$files" "$PB_DATA/storage"; else mkdir -p "$PB_DATA/storage"; fi
+
+# Ключ шифрования настроек должен совпадать с тем, которым шифровалась восстановленная база.
+if [ -s "$key" ]; then
+  [ -s "$ORDIUS_ETC/pocketbase.env" ] && cp "$ORDIUS_ETC/pocketbase.env" "$ORDIUS_ETC/pocketbase.env.before-restore-$stamp"
+  install -m 600 "$key" "$ORDIUS_ETC/pocketbase.env"
+fi
+if getent passwd pocketbase >/dev/null; then
+  chown -R pocketbase:pocketbase "$PB_DATA"
+fi
+
+log "запускаю PocketBase"
+svc start
+if [ "$NO_SYSTEMD" != "1" ]; then
+  for _ in $(seq 1 30); do
+    curl -fsS -m 2 http://127.0.0.1:8090/api/health >/dev/null 2>&1 && { log "восстановлено из копии $snapshot, сервис отвечает"; exit 0; }
+    sleep 1
+  done
+  die "PocketBase не отвечает после восстановления: journalctl -u $SERVICE -n 50"
+fi
+log "восстановлено из копии $snapshot"

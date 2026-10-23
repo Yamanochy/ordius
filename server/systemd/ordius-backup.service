@@ -1,0 +1,11 @@
+[Unit]
+Description=Ordius — почасовая копия в Selectel S3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ordius-backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=50min

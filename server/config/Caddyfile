@@ -1,0 +1,29 @@
+# Caddy принимает HTTPS-запросы и передаёт их PocketBase на 127.0.0.1:8090.
+# Сертификат Let's Encrypt выпускается и продлевается сам.
+# __DOMAIN__ заменяется на адрес приложения при установке (setup.sh).
+{
+	email ordius.info@yandex.ru
+}
+
+__DOMAIN__ {
+	encode zstd gzip
+
+	# Панель администратора и служебные разделы из интернета недоступны.
+	# Вход в панель — только через SSH-туннель (см. server/README.md).
+	@admin path /_ /_/* /api/collections/_superusers/* /api/settings* /api/backups* /api/logs* /api/crons*
+	respond @admin 404
+
+	reverse_proxy 127.0.0.1:8090 {
+		# живые обновления (realtime) приходят потоком — без буферизации
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Журнал запросов не ведём: в нём были бы IP-адреса пользователей.
+}

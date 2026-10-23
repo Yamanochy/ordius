@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Обновление PocketBase до указанной версии с копией до и откатом при сбое.
+#   sudo ordius-pb-update 0.40.6
+# Перед обновлением прочитайте список изменений: https://github.com/pocketbase/pocketbase/releases
+set -Eeuo pipefail
+# shellcheck source=../lib/common.sh
+source "${ORDIUS_LIB:-/usr/local/lib/ordius}/common.sh"
+
+ver=${1:-}
+[[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "укажите версию, например: sudo ordius-pb-update 0.40.6"
+SERVICE=${ORDIUS_PB_SERVICE:-ordius-pocketbase}
+link="$ORDIUS_OPT/pocketbase/pocketbase"
+prev=$(readlink -f "$link" || true)
+
+fetch_pocketbase "$ver"
+[ "$prev" = "$ORDIUS_OPT/pocketbase/pocketbase-$ver" ] && { log "уже стоит $ver"; exit 0; }
+
+log "копия перед обновлением"
+ordius-backup
+
+ln -sfn "pocketbase-$ver" "$link"
+systemctl restart "$SERVICE"
+for _ in $(seq 1 30); do
+  if curl -fsS -m 2 http://127.0.0.1:8090/api/health >/dev/null 2>&1; then
+    sed -i "s/^PB_VERSION=.*/PB_VERSION=$ver/" "$ORDIUS_ETC/ordius.conf"
+    log "PocketBase обновлён: $(basename "$prev") → pocketbase-$ver"
+    exit 0
+  fi
+  sleep 1
+done
+
+warn "новая версия не запустилась — возвращаю $(basename "$prev")"
+ln -sfn "$(basename "$prev")" "$link"
+systemctl restart "$SERVICE"
+die "обновление отменено. Если база успела измениться: sudo ordius-restore latest"

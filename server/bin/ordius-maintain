@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Ежедневное обслуживание копий Ordius (таймер ordius-maintain.timer, ночью):
+#   - удаляет копии старше срока хранения (48 почасовых, 21 ежедневная);
+#   - по воскресеньям проверяет хранилище и пробно восстанавливает последнюю копию.
+# Вручную: sudo ordius-maintain           — как ночью
+#          sudo ordius-maintain --test    — только пробное восстановление
+set -Eeuo pipefail
+# shellcheck source=../lib/common.sh
+source "${ORDIUS_LIB:-/usr/local/lib/ordius}/common.sh"
+load_backup_env
+
+trap 'report_failure "обслуживание копий не прошло"' EXIT
+
+exec 9>"$ORDIUS_DATA/.backup.lock"
+flock -w 900 9 || die "копирование занято больше 15 минут"
+
+# Функция в подоболочке: временная папка удаляется при любом исходе.
+restore_test() (
+  tmp=$(mktemp -d "$ORDIUS_DATA/restore-test.XXXXXX")
+  trap 'rm -rf "$tmp"' EXIT
+  r restore latest --quiet --host "$ORDIUS_HOST" --tag "$ORDIUS_TAG" --target "$tmp"
+  db="$tmp$SNAP_DIR/data.db"
+  if [ -e "$PB_DATA/data.db" ]; then
+    db_ok "$db" || die "пробное восстановление: база в копии повреждена или отсутствует"
+    log "пробное восстановление: база цела, записей в таблице _collections: $(sqlite3 "$db" 'SELECT count(*) FROM _collections;' 2>/dev/null || echo '?')"
+  fi
+  files_live=$(find "$PB_DATA/storage" -type f 2>/dev/null | wc -l)
+  files_copy=$(find "$tmp$PB_DATA/storage" -type f 2>/dev/null | wc -l)
+  log "пробное восстановление: файлов на сервере $files_live, в копии $files_copy"
+  # Новые фото могли появиться после последней копии, поэтому в копии файлов может быть чуть меньше.
+  [ "$files_copy" -ge $(( files_live * 95 / 100 )) ] || die "в копии заметно меньше файлов, чем на сервере"
+)
+
+if [ "${1:-}" = "--test" ]; then
+  restore_test
+  log "пробное восстановление прошло"
+  exit 0
+fi
+
+r forget --quiet --host "$ORDIUS_HOST" --tag "$ORDIUS_TAG" \
+  --keep-hourly "$KEEP_HOURLY" --keep-daily "$KEEP_DAILY" --prune
+log "старые копии удалены"
+
+if [ "$(date +%u)" = "7" ] || [ "${1:-}" = "--full" ]; then
+  r check --read-data-subset=5%
+  restore_test
+  log "проверка хранилища и пробное восстановление прошли"
+fi
+
+ping_health

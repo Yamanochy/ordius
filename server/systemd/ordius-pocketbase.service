@@ -1,0 +1,46 @@
+[Unit]
+Description=Ordius — PocketBase (база, вход, файлы, API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pocketbase
+Group=pocketbase
+EnvironmentFile=/etc/ordius/pocketbase.env
+ExecStart=/opt/ordius/pocketbase/pocketbase serve \
+  --http=127.0.0.1:8090 \
+  --dir=/var/lib/ordius/pb_data \
+  --publicDir=/opt/ordius/pb_public \
+  --hooksDir=/opt/ordius/pb_hooks \
+  --migrationsDir=/opt/ordius/pb_migrations \
+  --encryptionEnv=PB_ENCRYPTION_KEY \
+  --origins=https://__DOMAIN__
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+LimitNOFILE=8192
+
+# Ограничения: процесс пишет только в /var/lib/ordius, не видит домашние папки и не повышает права.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ordius
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

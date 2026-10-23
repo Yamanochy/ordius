@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Короткая сводка о состоянии сервера Ordius: sudo ordius-status
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+source "${ORDIUS_LIB:-/usr/local/lib/ordius}/common.sh"
+
+row() { printf '%-22s %s\n' "$1" "$2"; }
+
+for s in ordius-pocketbase caddy ordius-backup.timer ordius-maintain.timer; do
+  row "$s" "$(systemctl is-active "$s" 2>/dev/null || true)"
+done
+if curl -fsS -m 3 http://127.0.0.1:8090/api/health >/dev/null 2>&1; then
+  row "PocketBase API" "отвечает"
+else
+  row "PocketBase API" "НЕ ОТВЕЧАЕТ"
+fi
+row "PocketBase" "$(basename "$(readlink -f "$ORDIUS_OPT/pocketbase/pocketbase" 2>/dev/null)" 2>/dev/null)"
+
+last=$(cat "$SNAP_DIR/last-ok" 2>/dev/null || echo "ещё не было")
+row "Последняя копия" "$last"
+if [ "$last" != "ещё не было" ]; then
+  age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 60 ))
+  [ "$age" -gt 90 ] && row "" "ВНИМАНИЕ: копии не было $age мин"
+fi
+
+row "Диск" "$(df -h --output=used,size,pcent / | tail -1 | awk '{print $1" из "$2" ("$3")"}')"
+row "Фото и файлы" "$(du -sh "$PB_DATA/storage" 2>/dev/null | cut -f1)"
+row "База" "$(du -sh "$PB_DATA/data.db" 2>/dev/null | cut -f1)"
+row "Память" "$(free -h | awk '/^Mem:/ {print $3" из "$2}')"
+row "Обновления ОС" "$( [ -f /var/run/reboot-required ] && echo 'нужна перезагрузка (сделается сама в 04:00 НСК)' || echo 'в порядке')"

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Почасовая копия Ordius: снимок базы + фото + ключ шифрования настроек → restic → Selectel S3.
+# Запускается таймером ordius-backup.timer. Вручную: sudo ordius-backup
+set -Eeuo pipefail
+# shellcheck source=../lib/common.sh
+source "${ORDIUS_LIB:-/usr/local/lib/ordius}/common.sh"
+load_backup_env
+
+trap 'report_failure "копия не сделана"' EXIT
+
+exec 9>"$ORDIUS_DATA/.backup.lock"
+flock -n 9 || { log "копирование уже идёт — пропускаю"; exit 0; }
+
+mkdir -p "$SNAP_DIR" "$PB_DATA/storage"
+chmod 700 "$SNAP_DIR"
+
+# 1. Согласованный снимок базы. PocketBase в это время продолжает работать:
+#    .backup читает базу через SQLite API, а не копирует файл посреди записи.
+if [ -s "$PB_DATA/data.db" ]; then
+  rm -f "$SNAP_DIR/data.db.tmp"
+  sqlite3 "$PB_DATA/data.db" ".timeout 10000" ".backup '$SNAP_DIR/data.db.tmp'"
+  db_ok "$SNAP_DIR/data.db.tmp" || die "снимок базы повреждён — копия не отправлена"
+  mv -f "$SNAP_DIR/data.db.tmp" "$SNAP_DIR/data.db"
+else
+  warn "базы $PB_DATA/data.db ещё нет — копирую только файлы"
+fi
+
+# 2. Отправка. restic передаёт только изменившиеся куски, поэтому фото уходят один раз.
+paths=("$PB_DATA/storage")
+[ -s "$SNAP_DIR/data.db" ] && paths+=("$SNAP_DIR/data.db")
+[ -r "$ORDIUS_ETC/pocketbase.env" ] && paths+=("$ORDIUS_ETC/pocketbase.env")
+
+r backup --quiet --host "$ORDIUS_HOST" --tag "$ORDIUS_TAG" "${paths[@]}"
+
+date -u +%FT%TZ > "$SNAP_DIR/last-ok"
+log "копия отправлена: ${paths[*]}"
+ping_health

@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Проверка и настройка бакета копий Ordius в Selectel S3.
+
+Читает /etc/ordius/ordius.conf и /etc/ordius/backup.env. Делает:
+  1. проверяет, что ключи подходят и бакет доступен;
+  2. включает версионирование, если оно выключено;
+  3. ставит правило: прежние версии файлов удаляются через 7 дней,
+     недокачанные части — через 2 дня.
+Код выхода 0 — бакет готов; 1 — нет доступа. Если хранилище не поддерживает
+версионирование или правила, скрипт предупреждает, но не падает.
+"""
+import os
+import sys
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError, EndpointConnectionError
+
+ETC = os.environ.get("ORDIUS_ETC", "/etc/ordius")
+NONCURRENT_DAYS = 7
+
+
+def read_env(path):
+    values = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def main():
+    cfg = read_env(os.path.join(ETC, "ordius.conf"))
+    cfg.update(read_env(os.path.join(ETC, "backup.env")))
+    bucket = cfg["S3_BUCKET"]
+    scheme = cfg.get("S3_SCHEME", "https")
+    lookup = cfg.get("S3_LOOKUP", "dns")
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"{scheme}://{cfg['S3_ENDPOINT']}",
+        region_name=cfg.get("S3_REGION") or "us-east-1",
+        aws_access_key_id=cfg["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=cfg["AWS_SECRET_ACCESS_KEY"],
+        config=Config(
+            s3={"addressing_style": "virtual" if lookup == "dns" else "path"},
+            retries={"max_attempts": 3},
+            connect_timeout=10,
+            read_timeout=30,
+        ),
+    )
+
+    try:
+        s3.head_bucket(Bucket=bucket)
+    except (ClientError, EndpointConnectionError) as e:
+        print(f"ОШИБКА: нет доступа к бакету {bucket}: {e}", file=sys.stderr)
+        print("Проверьте имя бакета, пул и ключи (Access key / Secret key).", file=sys.stderr)
+        return 1
+    print(f"бакет {bucket}: доступ есть")
+
+    try:
+        status = s3.get_bucket_versioning(Bucket=bucket).get("Status")
+        if status != "Enabled":
+            s3.put_bucket_versioning(Bucket=bucket, VersioningConfiguration={"Status": "Enabled"})
+            status = s3.get_bucket_versioning(Bucket=bucket).get("Status")
+        if status == "Enabled":
+            print("версионирование: включено")
+        else:
+            print("ВНИМАНИЕ: версионирование не включилось — включите его в панели Selectel", file=sys.stderr)
+    except ClientError as e:
+        print(f"ВНИМАНИЕ: версионирование не настроено: {e}", file=sys.stderr)
+
+    rules = [
+        {
+            "ID": "ordius-noncurrent-expire",
+            "Status": "Enabled",
+            "Filter": {"Prefix": ""},
+            "NoncurrentVersionExpiration": {"NoncurrentDays": NONCURRENT_DAYS},
+            "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 2},
+        }
+    ]
+    try:
+        s3.put_bucket_lifecycle_configuration(Bucket=bucket, LifecycleConfiguration={"Rules": rules})
+        got = s3.get_bucket_lifecycle_configuration(Bucket=bucket).get("Rules", [])
+        ok = any(r.get("NoncurrentVersionExpiration", {}).get("NoncurrentDays") == NONCURRENT_DAYS for r in got)
+        print(f"правило хранения: прежние версии удаляются через {NONCURRENT_DAYS} дней" if ok
+              else "ВНИМАНИЕ: правило хранения не подтвердилось — проверьте в панели Selectel")
+    except ClientError as e:
+        print(f"ВНИМАНИЕ: правило хранения не поставлено ({e.response['Error'].get('Code')}). "
+              "Без него прежние версии будут копиться — поставьте правило в панели Selectel.", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
