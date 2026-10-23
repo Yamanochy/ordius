@@ -1,10 +1,13 @@
 /// <reference path="../pb_data/types.d.ts" />
-// Ограничения частоты для кодов: вступление в компанию и смена пароля по коду.
-// Подбирать 8-значные коды перебором с одного адреса не получится.
+// Ограничения частоты для кодов и звонков: вступление в компанию, смена пароля, подтверждение номера,
+// регистрация. Подбирать коды перебором и обзванивать чужие номера с одного адреса не получится.
+// Лимиты на сам номер и на сутки — в хуке /api/ordius/phone/start.
 migrate((app) => {
   const rules = [
     { label: "POST /api/ordius/join", maxRequests: 10, duration: 60 },
     { label: "POST /api/ordius/password-reset", maxRequests: 5, duration: 300 },
+    { label: "POST /api/ordius/phone/", maxRequests: 20, duration: 600 },
+    { label: "POST /api/ordius/signup", maxRequests: 10, duration: 600 },
   ];
   const s = app.settings();
   const have = s.rateLimits.rules.map((r) => r.label);
@@ -15,7 +18,7 @@ migrate((app) => {
   s.rateLimits.rules = next;
   app.save(s);
 }, (app) => {
-  const drop = ["POST /api/ordius/join", "POST /api/ordius/password-reset"];
+  const drop = ["POST /api/ordius/join", "POST /api/ordius/password-reset", "POST /api/ordius/phone/", "POST /api/ordius/signup"];
   const s = app.settings();
   s.rateLimits.rules = s.rateLimits.rules
     .filter((r) => drop.indexOf(r.label) === -1)

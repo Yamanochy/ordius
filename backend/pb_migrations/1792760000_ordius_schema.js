@@ -54,6 +54,30 @@ migrate((app) => {
   users.indexes.push("CREATE UNIQUE INDEX idx_users_phone ON users (phone) WHERE phone != ''");
   app.save(users);
 
+  // ---------- подтверждение номера звонком (только для сервера: правил доступа нет) ----------
+  // Каждая запись — один звонок: номер, цель, код до проверки, попытки, билет после проверки.
+  // Хранится 30 дней (нужно для лимитов и разбора злоупотреблений), потом удаляется задачей по расписанию.
+  make("phone_checks", [
+    text("phone", { required: true, pattern: PHONE, max: 16 }),
+    select("purpose", ["signup", "login", "reset", "change"], { required: true }),
+    select("status", ["sent", "verified", "used", "failed"], { required: true }),
+    text("code", { max: 8 }),
+    int("attempts", { min: 0 }),
+    date("expires", { required: true }),
+    text("ticket_hash", { max: 64 }),
+    date("ticket_expires"),
+    text("ip_hash", { max: 64 }),
+    rel("user", users.id, { cascadeDelete: true }),
+    text("call_id", { max: 64 }),
+    num("cost", { min: 0 }),
+    created(),
+  ], [
+    "CREATE INDEX idx_phone_checks_phone ON phone_checks (phone, created)",
+    "CREATE INDEX idx_phone_checks_ip ON phone_checks (ip_hash, created)",
+    "CREATE INDEX idx_phone_checks_created ON phone_checks (created)",
+    "CREATE UNIQUE INDEX idx_phone_checks_ticket ON phone_checks (ticket_hash) WHERE ticket_hash != ''",
+  ]);
+
   // ---------- компании и участники ----------
   const companies = make("companies", [
     text("name", { required: true, max: 200 }),
@@ -289,7 +313,8 @@ migrate((app) => {
     // себя и коллег по своим компаниям
     listRule: `id = @request.auth.id || (@request.auth.id != "" && @collection.memberships:me.user ?= @request.auth.id && @collection.memberships:me.status ?= "active" && @collection.memberships:them.user ?= id && @collection.memberships:them.company ?= @collection.memberships:me.company)`,
     viewRule: `id = @request.auth.id || (@request.auth.id != "" && @collection.memberships:me.user ?= @request.auth.id && @collection.memberships:me.status ?= "active" && @collection.memberships:them.user ?= id && @collection.memberships:them.company ?= @collection.memberships:me.company)`,
-    createRule: "",
+    // регистрация — только с подтверждённым номером, через /api/ordius/signup
+    createRule: null,
     updateRule: "id = @request.auth.id",
     deleteRule: null,
   });
@@ -441,7 +466,8 @@ migrate((app) => {
   });
 }, (app) => {
   for (const name of ["audit_log", "documents", "posts", "task_events", "tasks", "payouts", "adjustments",
-    "shift_entries", "shifts", "rate_factors", "rates", "sites", "customers", "vehicles", "memberships", "companies"]) {
+    "shift_entries", "shifts", "rate_factors", "rates", "sites", "customers", "vehicles", "memberships", "companies",
+    "phone_checks"]) {
     app.delete(app.findCollectionByNameOrId(name));
   }
 });

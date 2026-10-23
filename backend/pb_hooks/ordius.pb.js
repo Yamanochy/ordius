@@ -45,10 +45,15 @@ onRecordEnrich((e) => {
   e.next();
 }, "users");
 
+// Номер меняется только через подтверждение звонком (/api/ordius/phone/change); напрямую — только администратор.
 const normalizeUserPhone = (e) => {
   const { normalizePhone } = require(`${__hooks}/lib/util.js`);
   const body = e.requestInfo().body || {};
-  if (Object.prototype.hasOwnProperty.call(body, "phone")) {
+  const sent = Object.prototype.hasOwnProperty.call(body, "phone");
+  if (sent && !e.hasSuperuserAuth() && normalizePhone(body.phone) !== e.record.original().get("phone")) {
+    throw new BadRequestError("Номер меняется только с подтверждением звонком");
+  }
+  if (sent) {
     const raw = String(body.phone || "").trim();
     if (raw) {
       const p = normalizePhone(raw);
@@ -75,6 +80,215 @@ onRecordAuthWithPasswordRequest((e) => {
   }
   e.next();
 }, "users");
+
+// ---------- подтверждение номера звонком ----------
+// 1) POST /api/ordius/phone/start  { phone, purpose }  → робот звонит, { check, expires }
+//    purpose: signup — регистрация, login — вход без пароля, reset — новый пароль, change — смена номера (нужен вход)
+// 2) POST /api/ordius/phone/verify { check, code }     → code = последние 4 цифры входящего номера, { ticket }
+// 3) билет (15 минут, один раз) — в signup, phone/login, password-reset или phone/change.
+routerAdd("POST", "/api/ordius/phone/start", (e) => {
+  const { normalizePhone } = require(`${__hooks}/lib/util.js`);
+  const ph = require(`${__hooks}/lib/phone.js`);
+  const body = e.requestInfo().body || {};
+  const purpose = String(body.purpose || "");
+  if (ph.PURPOSES.indexOf(purpose) === -1) throw new BadRequestError("Неизвестная цель проверки");
+  const phone = normalizePhone(body.phone);
+  if (!phone) throw new BadRequestError("Телефон указан неверно");
+  const isUser = e.auth && e.auth.collection().name === "users";
+  if (purpose === "change" && !isUser) throw new UnauthorizedError("Войдите в приложение");
+
+  let existing = null;
+  try { existing = e.app.findFirstRecordByData("users", "phone", phone); } catch (_) { /* номер свободен */ }
+  if ((purpose === "signup" || purpose === "change") && existing) {
+    throw new BadRequestError("Этот номер уже зарегистрирован. Войдите или восстановите пароль");
+  }
+  if ((purpose === "login" || purpose === "reset") && !existing) {
+    throw new BadRequestError("Номер не зарегистрирован");
+  }
+
+  // Каждый звонок стоит денег и может быть использован, чтобы донимать чужой номер, поэтому лимиты.
+  const now = Date.now();
+  const count = (filter, params) => e.app.countRecords("phone_checks", $dbx.exp(filter, params));
+  const ipHash = $security.sha256("ordius:" + e.realIP());
+  if (count("phone = {:p} AND created >= {:t}", { p: phone, t: ph.iso(now - 3600e3) }) >= 3 ||
+      count("phone = {:p} AND created >= {:t}", { p: phone, t: ph.iso(now - 86400e3) }) >= 6) {
+    throw new TooManyRequestsError("На этот номер уже звонили несколько раз. Попробуйте позже");
+  }
+  // с одного адреса — 20 звонков в час: хватит, чтобы зарегистрировать бригаду с офисного Wi-Fi
+  const perIp = Number($os.getenv("ORDIUS_PHONE_IP_HOURLY")) || 20;
+  if (count("ip_hash = {:h} AND created >= {:t}", { h: ipHash, t: ph.iso(now - 3600e3) }) >= perIp) {
+    throw new TooManyRequestsError("Слишком много звонков с этого устройства. Попробуйте позже");
+  }
+  const cap = Number($os.getenv("ORDIUS_PHONE_DAILY_CAP")) || 300;
+  if (count("created >= {:t}", { t: ph.iso(now - 86400e3) }) >= cap) {
+    e.app.logger().error("phone check daily cap reached", "cap", cap);
+    throw new TooManyRequestsError("Сервис подтверждения временно перегружен. Попробуйте через час");
+  }
+
+  let call;
+  try {
+    call = ph.placeCall(phone, e.realIP());
+  } catch (err) {
+    e.app.logger().error("phone call failed", "error", String(err));
+    if (err.notConfigured) throw new ApiError(503, "Подтверждение номера ещё не настроено на сервере", null);
+    throw new BadRequestError("Не получилось позвонить. Проверьте номер и попробуйте через минуту");
+  }
+  const rec = new Record(e.app.findCollectionByNameOrId("phone_checks"));
+  rec.set("phone", phone);
+  rec.set("purpose", purpose);
+  rec.set("status", "sent");
+  rec.set("code", call.code);
+  rec.set("attempts", 0);
+  rec.set("expires", ph.iso(now + ph.CODE_TTL_MIN * 60e3));
+  rec.set("ip_hash", ipHash);
+  if (purpose === "change") rec.set("user", e.auth.id);
+  rec.set("call_id", call.callId);
+  rec.set("cost", call.cost);
+  e.app.save(rec);
+  return e.json(200, { check: rec.id, expires: rec.getString("expires"), digits: 4 });
+});
+
+routerAdd("POST", "/api/ordius/phone/verify", (e) => {
+  const ph = require(`${__hooks}/lib/phone.js`);
+  const body = e.requestInfo().body || {};
+  let rec = null;
+  try { rec = e.app.findRecordById("phone_checks", String(body.check || "")); } catch (_) { /* нет такой */ }
+  const again = "Запросите звонок ещё раз";
+  if (!rec || rec.get("status") !== "sent") throw new BadRequestError(again);
+  if (rec.getString("expires") < ph.iso(Date.now())) throw new BadRequestError("Время вышло. " + again);
+  const code = String(body.code || "").replace(/\D/g, "");
+  if (code !== rec.get("code")) {
+    const n = rec.getInt("attempts") + 1;
+    rec.set("attempts", n);
+    if (n >= ph.MAX_ATTEMPTS) { rec.set("status", "failed"); rec.set("code", ""); }
+    e.app.save(rec);
+    throw new BadRequestError(n >= ph.MAX_ATTEMPTS ? "Слишком много попыток. " + again : "Цифры не совпадают");
+  }
+  const ticket = $security.randomString(40);
+  rec.set("status", "verified");
+  rec.set("code", "");
+  rec.set("ticket_hash", $security.sha256(ticket));
+  rec.set("ticket_expires", ph.iso(Date.now() + ph.TICKET_TTL_MIN * 60e3));
+  e.app.save(rec);
+  return e.json(200, { ticket, phone: rec.get("phone"), purpose: rec.get("purpose") });
+});
+
+// Регистрация: POST /api/ordius/signup { ticket, name, password } → вход сразу (как auth-with-password).
+routerAdd("POST", "/api/ordius/signup", (e) => {
+  const ph = require(`${__hooks}/lib/phone.js`);
+  const body = e.requestInfo().body || {};
+  const chk = ph.findTicket(e.app, body.ticket, "signup");
+  if (!chk) throw new BadRequestError("Подтвердите номер ещё раз");
+  const name = String(body.name || "").trim().replace(/\s+/g, " ");
+  if (name.length < 2) throw new BadRequestError("Укажите имя и фамилию");
+  const pass = String(body.password || "");
+  if (pass.length < 8 || pass.length > 71) throw new BadRequestError("Пароль — от 8 до 71 символа");
+  const user = new Record(e.app.findCollectionByNameOrId("users"));
+  user.set("name", name.slice(0, 120));
+  user.set("phone", chk.get("phone"));
+  user.set("emailVisibility", false);
+  user.setPassword(pass);
+  try {
+    e.app.runInTransaction((tx) => {
+      tx.save(user);
+      chk.set("status", "used");
+      chk.set("user", user.id);
+      tx.save(chk);
+    });
+  } catch (err) {
+    e.app.logger().error("signup failed", "error", String(err));
+    throw new BadRequestError("Не получилось зарегистрироваться: возможно, номер уже занят");
+  }
+  return $apis.recordAuthResponse(e, user, "phone", null);
+});
+
+// Вход без пароля: POST /api/ordius/phone/login { ticket }.
+routerAdd("POST", "/api/ordius/phone/login", (e) => {
+  const ph = require(`${__hooks}/lib/phone.js`);
+  const body = e.requestInfo().body || {};
+  const chk = ph.findTicket(e.app, body.ticket, "login");
+  if (!chk) throw new BadRequestError("Подтвердите номер ещё раз");
+  let user = null;
+  try { user = e.app.findFirstRecordByData("users", "phone", chk.get("phone")); } catch (_) { /* удалён */ }
+  if (!user) throw new BadRequestError("Номер не зарегистрирован");
+  chk.set("status", "used");
+  chk.set("user", user.id);
+  e.app.save(chk);
+  return $apis.recordAuthResponse(e, user, "phone", null);
+});
+
+// Смена номера: POST /api/ordius/phone/change { ticket } — билет выдан на новый номер этому же человеку.
+routerAdd("POST", "/api/ordius/phone/change", (e) => {
+  const ph = require(`${__hooks}/lib/phone.js`);
+  const { audit } = require(`${__hooks}/lib/util.js`);
+  const body = e.requestInfo().body || {};
+  const chk = ph.findTicket(e.app, body.ticket, "change");
+  if (!chk || chk.get("user") !== e.auth.id) throw new BadRequestError("Подтвердите новый номер ещё раз");
+  const user = e.app.findRecordById("users", e.auth.id);
+  const phone = chk.get("phone");
+  try {
+    e.app.runInTransaction((tx) => {
+      user.set("phone", phone);
+      tx.save(user);
+      chk.set("status", "used");
+      tx.save(chk);
+      // контактный телефон в карточках сотрудника — тоже новый
+      for (const m of tx.findRecordsByFilter("memberships", "user = {:u}", "", 0, 0, { u: user.id })) {
+        m.set("phone", phone);
+        tx.save(m);
+        audit(tx, "update", m, user, { reason: "phone changed" });
+      }
+    });
+  } catch (err) {
+    e.app.logger().error("phone change failed", "error", String(err));
+    throw new BadRequestError("Не получилось сменить номер: возможно, он уже занят");
+  }
+  return e.json(200, { phone });
+}, $apis.requireAuth("users"));
+
+// Приглашения по номеру: руководитель завёл человека с телефоном — человек видит это после входа
+// и сам решает, вступать ли. GET /api/ordius/invitations, POST /api/ordius/invitations/{id}/accept
+routerAdd("GET", "/api/ordius/invitations", (e) => {
+  const phone = e.auth.get("phone");
+  if (!phone) return e.json(200, { items: [] });
+  const items = e.app.findRecordsByFilter("memberships",
+    "phone = {:p} && user = '' && status != 'dismissed'", "-created", 50, 0, { p: phone })
+    .map((m) => {
+      const c = e.app.findRecordById("companies", m.get("company"));
+      return { membership: m.id, company: c.id, company_name: c.get("name"), display_name: m.get("display_name"), roles: m.get("roles") };
+    });
+  return e.json(200, { items });
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/ordius/invitations/{id}/accept", (e) => {
+  const { audit } = require(`${__hooks}/lib/util.js`);
+  const phone = e.auth.get("phone");
+  let m = null;
+  try {
+    m = e.app.findFirstRecordByFilter("memberships", "id = {:id} && phone = {:p} && user = '' && status != 'dismissed'",
+      { id: e.request.pathValue("id"), p: phone || "-" });
+  } catch (_) { /* нет приглашения */ }
+  if (!phone || !m) throw new NotFoundError("Приглашение не найдено");
+  let dup = null;
+  try {
+    dup = e.app.findFirstRecordByFilter("memberships", "company = {:c} && user = {:u}", { c: m.get("company"), u: e.auth.id });
+  } catch (_) { /* нет дубля */ }
+  if (dup) throw new BadRequestError("Вы уже состоите в этой компании");
+  m.set("user", e.auth.id);
+  m.set("invite_code", "");
+  m.set("invite_expires", "");
+  if (m.get("status") === "pending") m.set("status", "active");
+  e.app.save(m);
+  audit(e.app, "update", m, e.auth, { reason: "invitation accepted" });
+  const c = e.app.findRecordById("companies", m.get("company"));
+  return e.json(200, { membership: m.id, company: c.id, company_name: c.get("name"), status: m.get("status") });
+}, $apis.requireAuth("users"));
+
+// Проверки звонков храним 30 дней, потом удаляем.
+cronAdd("ordius_phone_checks_cleanup", "17 21 * * *", () => {
+  const cutoff = new Date(Date.now() - 30 * 86400e3).toISOString().replace("T", " ");
+  $app.db().newQuery("DELETE FROM phone_checks WHERE created < {:t}").bind({ t: cutoff }).execute();
+});
 
 // ---------- компании: создатель становится владельцем ----------
 onRecordCreateRequest((e) => {
@@ -229,13 +443,33 @@ routerAdd("POST", "/api/ordius/memberships/{id}/password-code", (e) => {
 
 // Новый пароль по коду: POST /api/ordius/password-reset { phone, code, password }.
 // Все входы на других устройствах после этого сбрасываются.
+// Или { ticket, password } — билет после подтверждения номера звонком (purpose = reset).
 routerAdd("POST", "/api/ordius/password-reset", (e) => {
   const { normalizePhone, nowIso, audit } = require(`${__hooks}/lib/util.js`);
   const body = e.requestInfo().body || {};
-  const phone = normalizePhone(body.phone);
-  const c = String(body.code || "").trim().toUpperCase().replace(/[\s-]/g, "");
   const pass = String(body.password || "");
   if (pass.length < 8 || pass.length > 71) throw new BadRequestError("Пароль — от 8 до 71 символа");
+
+  if (body.ticket) {
+    const ph = require(`${__hooks}/lib/phone.js`);
+    const chk = ph.findTicket(e.app, body.ticket, "reset");
+    let u = null;
+    if (chk) {
+      try { u = e.app.findFirstRecordByData("users", "phone", chk.get("phone")); } catch (_) { /* удалён */ }
+    }
+    if (!u) throw new BadRequestError("Подтвердите номер ещё раз");
+    e.app.runInTransaction((tx) => {
+      u.setPassword(pass);
+      tx.save(u);
+      chk.set("status", "used");
+      chk.set("user", u.id);
+      tx.save(chk);
+    });
+    return e.json(200, { ok: true });
+  }
+
+  const phone = normalizePhone(body.phone);
+  const c = String(body.code || "").trim().toUpperCase().replace(/[\s-]/g, "");
   const wrong = "Телефон или код не подходят";
   if (!phone || c.length < 6) throw new BadRequestError(wrong);
   let user = null;
