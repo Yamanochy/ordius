@@ -198,6 +198,65 @@ routerAdd("POST", "/api/ordius/memberships/{id}/invite", (e) => {
   return e.json(200, { code: c, expires });
 }, $apis.requireAuth("users"));
 
+// ---------- смена пароля без почты ----------
+// Руководитель выдаёт сотруднику одноразовый код на сутки: POST /api/ordius/memberships/{id}/password-code
+// Ограничения — чтобы код не стал способом зайти под чужим аккаунтом:
+//   владельцу код не выдаётся (только поддержка), руководителю — только владельцем;
+//   человеку, который состоит ещё в одной компании, — только поддержка (иначе руководитель
+//   одной компании получил бы доступ к данным другой).
+routerAdd("POST", "/api/ordius/memberships/{id}/password-code", (e) => {
+  const { membershipOf, hasRole, code, audit } = require(`${__hooks}/lib/util.js`);
+  const m = e.app.findRecordById("memberships", e.request.pathValue("id"));
+  const me = membershipOf(e.app, m.get("company"), e.auth.id);
+  if (!hasRole(me, ["owner", "manager"])) throw new ForbiddenError("Только владелец или руководитель");
+  const userId = m.get("user");
+  if (!userId) throw new BadRequestError("Человек ещё не входил в приложение — выдайте ему приглашение");
+  if (userId === e.auth.id) throw new BadRequestError("Свой пароль меняйте в профиле");
+  if (m.get("status") !== "active") throw new BadRequestError("Сотрудник не работает в компании");
+  if (hasRole(m, ["owner"])) throw new ForbiddenError("Пароль владельца сбрасывается только через поддержку");
+  if (hasRole(m, ["manager"]) && !hasRole(me, ["owner"])) throw new ForbiddenError("Код для руководителя выдаёт только владелец");
+  const elsewhere = e.app.findRecordsByFilter("memberships",
+    "user = {:u} && company != {:c} && status != 'dismissed'", "", 1, 0, { u: userId, c: m.get("company") });
+  if (elsewhere.length) throw new BadRequestError("Сотрудник состоит и в другой компании — сброс пароля через поддержку");
+  const c = code(8);
+  const expires = new Date(Date.now() + 24 * 3600 * 1000).toISOString().replace("T", " ");
+  m.set("reset_code", c);
+  m.set("reset_expires", expires);
+  e.app.save(m);
+  audit(e.app, "update", m, e.auth, { reason: "password reset code issued" });
+  return e.json(200, { code: c, expires });
+}, $apis.requireAuth("users"));
+
+// Новый пароль по коду: POST /api/ordius/password-reset { phone, code, password }.
+// Все входы на других устройствах после этого сбрасываются.
+routerAdd("POST", "/api/ordius/password-reset", (e) => {
+  const { normalizePhone, nowIso, audit } = require(`${__hooks}/lib/util.js`);
+  const body = e.requestInfo().body || {};
+  const phone = normalizePhone(body.phone);
+  const c = String(body.code || "").trim().toUpperCase().replace(/[\s-]/g, "");
+  const pass = String(body.password || "");
+  if (pass.length < 8 || pass.length > 71) throw new BadRequestError("Пароль — от 8 до 71 символа");
+  const wrong = "Телефон или код не подходят";
+  if (!phone || c.length < 6) throw new BadRequestError(wrong);
+  let user = null;
+  let m = null;
+  try {
+    user = e.app.findFirstRecordByData("users", "phone", phone);
+    m = e.app.findFirstRecordByFilter("memberships",
+      "user = {:u} && reset_code = {:c} && reset_expires >= {:now} && status = 'active'", { u: user.id, c, now: nowIso() });
+  } catch (_) { /* неверный телефон или код */ }
+  if (!user || !m) throw new BadRequestError(wrong);
+  e.app.runInTransaction((txApp) => {
+    user.setPassword(pass);
+    txApp.save(user);
+    m.set("reset_code", "");
+    m.set("reset_expires", "");
+    txApp.save(m);
+  });
+  audit(e.app, "update", m, user, { reason: "password reset by code" });
+  return e.json(200, { ok: true });
+});
+
 // Роль владельца: выдаёт и снимает только владелец; у компании всегда остаётся хотя бы один владелец.
 const guardOwners = (e) => {
   const isCreate = e.record.isNew();

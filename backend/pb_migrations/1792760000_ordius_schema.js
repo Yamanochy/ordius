@@ -77,9 +77,13 @@ migrate((app) => {
     // личное приглашение для заведённого руководителем человека (видит только сервер)
     text("invite_code", { max: 16, hidden: true }),
     date("invite_expires", { hidden: true }),
+    // одноразовый код смены пароля для сотрудника без почты (выдаёт руководитель, видит только сервер)
+    text("reset_code", { max: 16, hidden: true }),
+    date("reset_expires", { hidden: true }),
     created(), updated(),
   ], [
     "CREATE UNIQUE INDEX idx_memberships_invite ON memberships (invite_code) WHERE invite_code != ''",
+    "CREATE UNIQUE INDEX idx_memberships_reset ON memberships (reset_code) WHERE reset_code != ''",
     "CREATE UNIQUE INDEX idx_memberships_company_user ON memberships (company, user) WHERE user != ''",
     "CREATE INDEX idx_memberships_user ON memberships (user, status)",
   ]);

@@ -66,6 +66,11 @@ const view = (col, id, token) => api("GET", `/api/collections/${col}/records/${i
 // ---------- подготовка ----------
 const su = (await api("POST", "/api/collections/_superusers/auth-with-password",
   { body: { identity: "admin@test.local", password: "Adm1nPassw0rd!" } })).json.token;
+const settings = (await api("GET", "/api/settings", { token: su })).json;
+const labels = settings.rateLimits.rules.map((r) => r.label);
+check("ограничения частоты: стандартные правила на месте и добавлены коды",
+  settings.rateLimits.enabled && labels.includes("*:auth") && labels.includes("POST /api/ordius/join") && labels.includes("POST /api/ordius/password-reset"), labels);
+check("в журнале запросов нет IP, хранится 14 дней", settings.logs.logIP === false && settings.logs.maxDays === 14, settings.logs);
 await api("PATCH", "/api/settings", { token: su, body: { rateLimits: { enabled: false } } });
 
 const PASS = "Test-passw0rd-123";
@@ -375,6 +380,29 @@ const docOther = new FormData();
 docOther.append("company", companyA); docOther.append("kind", "waybill"); docOther.append("shift", s5.json.id);
 docOther.append("files", new Blob([jpeg], { type: "image/jpeg" }), "y.jpg");
 check("к чужой смене своей компании документ не приложить", !is2xx(await api("POST", "/api/collections/documents/records", { token: MECH.token, form: docOther })));
+
+// ---------- смена пароля по коду руководителя ----------
+const pc = (id, token) => api("POST", `/api/ordius/memberships/${id}/password-code`, { token });
+check("водитель код смены пароля не выдаёт", (await pc(MGR.membership, D1.token)).status === 403);
+check("руководитель не выдаёт код владельцу", (await pc(ownerMembership, MGR.token)).status === 403);
+check("руководитель не выдаёт код другому руководителю (только владелец)", !is2xx(await pc(MGR.membership, MGR.token)));
+const joinB = await api("POST", "/api/ordius/join", { token: ACC.token, body: { code: (await view("companies", companyB, B.token)).json.join_code } });
+check("бухгалтер подал заявку и во вторую компанию", is2xx(joinB) && joinB.json.status === "pending", joinB.json);
+const accCode = await pc(ACC.membership, MGR.token);
+check("человеку из двух компаний код не выдаётся", accCode.status === 400 && /другой компании/.test(accCode.text), accCode.json);
+const d1Code = await pc(d1Membership, MGR.token);
+check("руководитель выдаёт код водителю", is2xx(d1Code) && /^[A-Z2-9]{8}$/.test(d1Code.json.code), d1Code.json);
+check("код смены пароля не виден в API", (await view("memberships", d1Membership, A.token)).json.reset_code === undefined);
+const NEWPASS = "Novyi-parol-2026";
+const reset = (code, phone = "+79230000033") => api("POST", "/api/ordius/password-reset", { body: { phone, code, password: NEWPASS } });
+check("неверный код не подходит", (await reset("ZZZZZZZZ")).status === 400);
+check("код к чужому телефону не подходит", (await reset(d1Code.json.code, "+79230000005")).status === 400);
+const r1 = await reset(d1Code.json.code.toLowerCase());
+check("водитель задаёт новый пароль по коду", is2xx(r1), r1.json);
+check("старый вход водителя больше не действует", (await api("POST", "/api/collections/users/auth-refresh", { token: D1.token })).status === 401);
+const relog = await api("POST", "/api/collections/users/auth-with-password", { body: { identity: "89230000033", password: NEWPASS } });
+check("вход с новым паролем", relog.status === 200 && !!relog.json.token, relog.json);
+check("код одноразовый", (await reset(d1Code.json.code)).status === 400);
 
 // ---------- защита от засорения ----------
 for (let i = 0; i < 4; i++) await create("companies", B.token, { name: "Б-" + i });
