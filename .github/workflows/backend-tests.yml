@@ -1,0 +1,39 @@
+# Проверка схемы, правил доступа и расчётов на настоящем PocketBase той же версии, что на сервере.
+# Запускается на каждое изменение backend/ — в ветках и в pull request.
+name: backend-tests
+
+on:
+  push:
+    paths: [backend/**, .github/workflows/backend-tests.yml]
+  pull_request:
+    paths: [backend/**, .github/workflows/backend-tests.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PB_VERSION: "0.40.5"
+      # sha256 официального pocketbase_0.40.5_linux_amd64.zip; при обновлении версии — заменить вместе с PB_VERSION
+      PB_SHA256: "1dbea1b01eb3dfe64953513859d01e759c96650c4e3264fa4eecd54b769382e4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: PocketBase (с проверкой контрольной суммы)
+        run: |
+          set -euo pipefail
+          zip="pocketbase_${PB_VERSION}_linux_amd64.zip"
+          curl -fsSL --retry 3 -O "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/$zip"
+          echo "${PB_SHA256}  $zip" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/pb" && unzip -q "$zip" -d "$RUNNER_TEMP/pb"
+          echo "PB_BIN=$RUNNER_TEMP/pb/pocketbase" >> "$GITHUB_ENV"
+      - name: Расчёт заработка
+        run: node backend/test/calc.test.mjs
+      - name: Правила доступа и серверная логика
+        run: node backend/test/api.test.mjs
