@@ -64,7 +64,11 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 ask_secret() {
   local prompt=$1 var=$2 value=${!2:-}
   if [ -z "$value" ]; then
-    read -r -s -p "  $prompt: " value 2>/dev/null < /dev/tty || true; echo
+    # Подсказку печатаем сами: read -p пишет её в stderr, а он может быть перенаправлен.
+    if { printf '  %s: ' "$prompt" > /dev/tty; } 2>/dev/null; then
+      IFS= read -r -s value < /dev/tty || true
+      printf '\n' > /dev/tty
+    fi
   fi
   [ -n "$value" ] || die "пустое значение: $prompt"
   printf -v "$var" '%s' "$value"
@@ -80,7 +84,11 @@ show_secret() {
   printf '  \033[1;33m│\033[0m\n  \033[1;33m│\033[0m     %s\n' "$value"
   printf '  \033[1;33m└────────────────────────────────────────────────────────────\033[0m\n'
   while :; do
-    read -r -p "  Сохранили? Напишите да и нажмите Enter: " answer 2>/dev/null < /dev/tty || answer="да"
+    if { printf '  Сохранили? Напишите да и нажмите Enter: ' > /dev/tty; } 2>/dev/null; then
+      IFS= read -r answer < /dev/tty || answer="да"
+    else
+      answer="да"   # нет терминала (автоматическая проверка)
+    fi
     case "$answer" in да|Да|ДА|yes|y) break ;; esac
   done
 }
