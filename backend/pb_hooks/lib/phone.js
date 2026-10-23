@@ -1,54 +1,79 @@
-// Подтверждение номера телефона звонком.
+// Подтверждение номера телефона звонком через SMS.ru. Два способа:
 //
-// Провайдер — SMS.ru, метод «звонок с кодом»: робот звонит человеку и сбрасывает, код — последние
-// 4 цифры номера, с которого пришёл звонок. 0,40 ₽ за звонок по России, без имени отправителя
-// и абонентской платы (SMS сейчас ~8,4 ₽ плюс 2–3 тыс. ₽ в месяц за имя отправителя у каждого оператора).
+//   callcheck (основной) — человек сам звонит на номер, который выдал SMS.ru; звонок сбрасывается,
+//     для звонящего бесплатный. Доказывает, что SIM-карта у человека в руках, и не даёт обзванивать
+//     чужие номера: сами мы никому не звоним. Статус проверяем запросом к SMS.ru.
+//   call (запасной) — робот SMS.ru звонит человеку и сбрасывает, код — последние 4 цифры входящего номера.
+//     0,40 ₽ за звонок по России. SMS.ru пометил этот метод устаревшим: работает, пока его не выключат.
+//
+// SMS не используем: без своего имени отправителя ~18–21 ₽ за сообщение, со своим — 2–3 тыс. ₽ в месяц
+// абонентской платы у каждого оператора.
 //
 // Настройка на сервере, файл /etc/ordius/pocketbase.env:
 //   SMSRU_API_ID=<ключ из личного кабинета SMS.ru>
-//   ORDIUS_PHONE_DAILY_CAP=300      (необязательно: потолок звонков в сутки на весь сервис)
-//   ORDIUS_PHONE_IP_HOURLY=20       (необязательно: звонков в час с одного адреса)
-// Для автотестов: ORDIUS_PHONE_PROVIDER=test и ORDIUS_TEST_CODE=<4 цифры> — звонка нет.
+//   ORDIUS_PHONE_DAILY_CAP=300      (необязательно: потолок проверок в сутки на весь сервис)
+//   ORDIUS_PHONE_IP_HOURLY=20       (необязательно: проверок в час с одного адреса)
+// ORDIUS_SMSRU_BASE — адрес SMS.ru; меняют только автотесты (подставляют местную заглушку).
 
 const PURPOSES = ["signup", "login", "reset", "change"];
-const CODE_TTL_MIN = 5;
-const TICKET_TTL_MIN = 15;
-const MAX_ATTEMPTS = 5;
+const METHODS = ["callcheck", "call"];
+const CODE_TTL_MIN = 5;      // столько SMS.ru ждёт звонка (callcheck) / столько живёт код (call)
+const TICKET_TTL_MIN = 15;   // столько живёт билет после подтверждения
+const MAX_ATTEMPTS = 5;      // неверных вводов кода (call)
+const POLL_GAP_MS = 2000;    // не чаще одного запроса статуса к SMS.ru за 2 секунды на проверку
+const RU_MOBILE = /^\+79\d{9}$/;
 
 function iso(ms) {
   return new Date(ms).toISOString().replace("T", " ");
 }
 
-// Звонок с кодом. Возвращает { code, callId, cost } или бросает ошибку (err.notConfigured — нет ключа).
-function placeCall(phone, ip) {
-  const provider = $os.getenv("ORDIUS_PHONE_PROVIDER") || "smsru";
-  if (provider === "test") {
-    const code = $os.getenv("ORDIUS_TEST_CODE");
-    if (!/^\d{4}$/.test(code)) throw new Error("ORDIUS_TEST_CODE не задан");
-    return { code, callId: "test", cost: 0 };
-  }
+// Запрос к SMS.ru. Без ключа — ошибка с notConfigured (сервер ответит 503, а не притворится, что звонит).
+function smsru(path, params) {
   const key = $os.getenv("SMSRU_API_ID");
   if (!key) {
     const err = new Error("SMSRU_API_ID не задан");
     err.notConfigured = true;
     throw err;
   }
-  const body = "api_id=" + encodeURIComponent(key) +
-    "&phone=" + encodeURIComponent(phone.replace(/\D/g, "")) +
-    "&ip=" + encodeURIComponent(ip || "-1") + "&json=1";
+  const all = Object.assign({ api_id: key, json: "1" }, params);
+  const body = Object.keys(all).map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(all[k])).join("&");
   const res = $http.send({
-    url: $os.getenv("ORDIUS_SMSRU_URL") || "https://sms.ru/code/call", // подмена адреса — только для автотестов
+    url: ($os.getenv("ORDIUS_SMSRU_BASE") || "https://sms.ru") + path,
     method: "POST",
     body,
     headers: { "content-type": "application/x-www-form-urlencoded" },
     timeout: 15,
   });
   const j = res.json || {};
-  const code = String(j.code || "");
-  if (res.statusCode !== 200 || j.status !== "OK" || !/^\d{4}$/.test(code)) {
-    throw new Error("SMS.ru: " + (j.status_text || j.status_code || res.statusCode));
+  if (res.statusCode !== 200 || j.status !== "OK") {
+    throw new Error("SMS.ru " + path + ": " + (j.status_text || j.status_code || res.statusCode));
   }
-  return { code, callId: String(j.call_id || ""), cost: Number(j.cost) || 0 };
+  return j;
+}
+
+// call: робот звонит человеку. → { code, providerId, cost }
+function placeCall(phone, ip) {
+  const j = smsru("/code/call", { phone: phone.replace(/\D/g, ""), ip: ip || "-1" });
+  const code = String(j.code || "");
+  if (!/^\d{4}$/.test(code)) throw new Error("SMS.ru /code/call: нет кода в ответе");
+  return { code, providerId: String(j.call_id || ""), cost: Number(j.cost) || 0 };
+}
+
+// callcheck: человек звонит сам. → { providerId, callPhone, callPhonePretty }
+function startCallcheck(phone) {
+  const j = smsru("/callcheck/add", { phone: phone.replace(/\D/g, "") });
+  const callPhone = String(j.call_phone || "").replace(/\D/g, "");
+  if (!j.check_id || callPhone.length < 10) throw new Error("SMS.ru /callcheck/add: нет номера для звонка");
+  return { providerId: String(j.check_id), callPhone: "+" + callPhone, callPhonePretty: String(j.call_phone_pretty || "+" + callPhone) };
+}
+
+// Статус callcheck: "verified" (звонок был), "waiting" (ещё нет), "expired" (время вышло).
+function callcheckStatus(providerId) {
+  const j = smsru("/callcheck/status", { check_id: providerId });
+  const s = Number(j.check_status);
+  if (s === 401) return "verified";
+  if (s === 402) return "expired";
+  return "waiting";
 }
 
 // Подтверждённая и ещё не использованная проверка по билету, или null.
@@ -64,4 +89,7 @@ function findTicket(app, ticket, purpose) {
   }
 }
 
-module.exports = { PURPOSES, CODE_TTL_MIN, TICKET_TTL_MIN, MAX_ATTEMPTS, iso, placeCall, findTicket };
+module.exports = {
+  PURPOSES, METHODS, CODE_TTL_MIN, TICKET_TTL_MIN, MAX_ATTEMPTS, POLL_GAP_MS, RU_MOBILE,
+  iso, placeCall, startCallcheck, callcheckStatus, findTicket,
+};

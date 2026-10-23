@@ -82,18 +82,26 @@ onRecordAuthWithPasswordRequest((e) => {
 }, "users");
 
 // ---------- подтверждение номера звонком ----------
-// 1) POST /api/ordius/phone/start  { phone, purpose }  → робот звонит, { check, expires }
-//    purpose: signup — регистрация, login — вход без пароля, reset — новый пароль, change — смена номера (нужен вход)
-// 2) POST /api/ordius/phone/verify { check, code }     → code = последние 4 цифры входящего номера, { ticket }
-// 3) билет (15 минут, один раз) — в signup, phone/login, password-reset или phone/change.
+// purpose: signup — регистрация, login — вход без пароля, reset — новый пароль, change — смена номера (нужен вход).
+// Основной способ (method = callcheck): человек сам звонит на выданный номер, звонок бесплатный и сбрасывается.
+//   1) POST /api/ordius/phone/start  { phone, purpose }  → { check, ticket, call_phone, call_phone_pretty, expires }
+//   2) POST /api/ordius/phone/status { check }           → { status: waiting | verified | expired }, опрашивать раз в 2–3 с
+// Запасной (method = call): робот звонит человеку, тот вводит последние 4 цифры входящего номера.
+//   1) POST /api/ordius/phone/start  { phone, purpose, method: "call" } → { check, expires, digits: 4 }
+//   2) POST /api/ordius/phone/verify { check, code }     → { ticket }
+// 3) Билет (15 минут после подтверждения, один раз) — в signup, phone/login, password-reset или phone/change.
 routerAdd("POST", "/api/ordius/phone/start", (e) => {
   const { normalizePhone } = require(`${__hooks}/lib/util.js`);
   const ph = require(`${__hooks}/lib/phone.js`);
   const body = e.requestInfo().body || {};
   const purpose = String(body.purpose || "");
   if (ph.PURPOSES.indexOf(purpose) === -1) throw new BadRequestError("Неизвестная цель проверки");
+  const method = String(body.method || "callcheck");
+  if (ph.METHODS.indexOf(method) === -1) throw new BadRequestError("Неизвестный способ проверки");
   const phone = normalizePhone(body.phone);
   if (!phone) throw new BadRequestError("Телефон указан неверно");
+  // вход в российские сервисы — по номеру российского оператора (закон 406-ФЗ); водители — с мобильных
+  if (!ph.RU_MOBILE.test(phone)) throw new BadRequestError("Нужен российский мобильный номер: +7 9…");
   const isUser = e.auth && e.auth.collection().name === "users";
   if (purpose === "change" && !isUser) throw new UnauthorizedError("Войдите в приложение");
 
@@ -127,25 +135,74 @@ routerAdd("POST", "/api/ordius/phone/start", (e) => {
 
   let call;
   try {
-    call = ph.placeCall(phone, e.realIP());
+    call = method === "callcheck" ? ph.startCallcheck(phone) : ph.placeCall(phone, e.realIP());
   } catch (err) {
-    e.app.logger().error("phone call failed", "error", String(err));
+    e.app.logger().error("phone check start failed", "method", method, "error", String(err));
     if (err.notConfigured) throw new ApiError(503, "Подтверждение номера ещё не настроено на сервере", null);
-    throw new BadRequestError("Не получилось позвонить. Проверьте номер и попробуйте через минуту");
+    throw new BadRequestError(method === "callcheck"
+      ? "Не получилось начать проверку. Попробуйте через минуту"
+      : "Не получилось позвонить. Проверьте номер или подтвердите звонком со своего телефона");
   }
   const rec = new Record(e.app.findCollectionByNameOrId("phone_checks"));
   rec.set("phone", phone);
   rec.set("purpose", purpose);
+  rec.set("method", method);
   rec.set("status", "sent");
-  rec.set("code", call.code);
   rec.set("attempts", 0);
   rec.set("expires", ph.iso(now + ph.CODE_TTL_MIN * 60e3));
   rec.set("ip_hash", ipHash);
   if (purpose === "change") rec.set("user", e.auth.id);
-  rec.set("call_id", call.callId);
-  rec.set("cost", call.cost);
+  rec.set("call_id", call.providerId);
+  if (method === "call") {
+    rec.set("code", call.code);
+    rec.set("cost", call.cost);
+    e.app.save(rec);
+    return e.json(200, { check: rec.id, method, expires: rec.getString("expires"), digits: 4 });
+  }
+  // callcheck: билет выдаём сразу тому, кто начал проверку; действовать он начнёт после звонка
+  const ticket = $security.randomString(40);
+  rec.set("call_phone", call.callPhone);
+  rec.set("ticket_hash", $security.sha256(ticket));
   e.app.save(rec);
-  return e.json(200, { check: rec.id, expires: rec.getString("expires"), digits: 4 });
+  return e.json(200, {
+    check: rec.id, method, ticket, expires: rec.getString("expires"),
+    call_phone: call.callPhone, call_phone_pretty: call.callPhonePretty,
+  });
+});
+
+// Был ли звонок (callcheck): POST /api/ordius/phone/status { check }. Секретов в ответе нет.
+routerAdd("POST", "/api/ordius/phone/status", (e) => {
+  const ph = require(`${__hooks}/lib/phone.js`);
+  const body = e.requestInfo().body || {};
+  let rec = null;
+  try { rec = e.app.findRecordById("phone_checks", String(body.check || "")); } catch (_) { /* нет такой */ }
+  if (!rec || rec.get("method") !== "callcheck") throw new NotFoundError("Проверка не найдена");
+  const st = rec.get("status");
+  if (st === "verified" || st === "used") return e.json(200, { status: "verified" });
+  if (st === "failed") return e.json(200, { status: "expired" });
+  const now = Date.now();
+  if (rec.getString("expires") < ph.iso(now)) {
+    rec.set("status", "failed");
+    e.app.save(rec);
+    return e.json(200, { status: "expired" });
+  }
+  const last = rec.getString("last_checked");
+  if (last && last > ph.iso(now - ph.POLL_GAP_MS)) return e.json(200, { status: "waiting" });
+  rec.set("last_checked", ph.iso(now));
+  let result = "waiting";
+  try {
+    result = ph.callcheckStatus(rec.get("call_id"));
+  } catch (err) {
+    e.app.logger().error("callcheck status failed", "error", String(err));
+  }
+  if (result === "verified") {
+    rec.set("status", "verified");
+    rec.set("ticket_expires", ph.iso(now + ph.TICKET_TTL_MIN * 60e3));
+  } else if (result === "expired") {
+    rec.set("status", "failed");
+  }
+  e.app.save(rec);
+  return e.json(200, { status: result });
 });
 
 routerAdd("POST", "/api/ordius/phone/verify", (e) => {
@@ -154,7 +211,7 @@ routerAdd("POST", "/api/ordius/phone/verify", (e) => {
   let rec = null;
   try { rec = e.app.findRecordById("phone_checks", String(body.check || "")); } catch (_) { /* нет такой */ }
   const again = "Запросите звонок ещё раз";
-  if (!rec || rec.get("status") !== "sent") throw new BadRequestError(again);
+  if (!rec || rec.get("method") !== "call" || rec.get("status") !== "sent") throw new BadRequestError(again);
   if (rec.getString("expires") < ph.iso(Date.now())) throw new BadRequestError("Время вышло. " + again);
   const code = String(body.code || "").replace(/\D/g, "");
   if (code !== rec.get("code")) {

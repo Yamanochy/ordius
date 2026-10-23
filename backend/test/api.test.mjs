@@ -24,20 +24,56 @@ const freePort = () => new Promise((res) => {
   const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => res(p)); });
 });
 
+// ---------- заглушка SMS.ru: настоящих звонков нет, но сервер ходит в «SMS.ru» по-настоящему ----------
+// /code/call — робот «звонит», код всегда TEST_CODE; /callcheck/add и /callcheck/status — человек звонит сам;
+// /__call?check_id=… — тест «звонит» с телефона человека, /__expire?check_id=… — время вышло.
+import http from "node:http";
+const TEST_CODE = "1435";
+const SMSRU_KEY = "TEST-API-ID";
+const seen = [];
+const called = new Set(), expired = new Set();
+let checkSeq = 0;
+const mock = http.createServer((req, res) => {
+  let b = ""; req.on("data", (c) => { b += c; }); req.on("end", () => {
+    const u = new URL(req.url, "http://x");
+    const params = Object.fromEntries(new URLSearchParams(b));
+    res.setHeader("Content-Type", "application/json");
+    const send = (o) => res.end(JSON.stringify(o));
+    if (u.pathname === "/__call") { called.add(u.searchParams.get("check_id")); return send({ ok: true }); }
+    if (u.pathname === "/__expire") { expired.add(u.searchParams.get("check_id")); return send({ ok: true }); }
+    seen.push({ path: u.pathname, method: req.method, params });
+    if (params.api_id !== SMSRU_KEY) return send({ status: "ERROR", status_code: 200, status_text: "Неправильный api_id" });
+    if (u.pathname === "/code/call") return send({ status: "OK", code: TEST_CODE, call_id: "201737-542", cost: 0.4, balance: 99.6 });
+    if (u.pathname === "/callcheck/add") {
+      const id = `201737-${++checkSeq}`;
+      return send({ status: "OK", status_code: 100, check_id: id, call_phone: "78005553535",
+        call_phone_pretty: "+7 (800) 555-3535", call_phone_html: "<a href=\"callto:78005553535\">+7 (800) 555-3535</a>" });
+    }
+    if (u.pathname === "/callcheck/status") {
+      const id = params.check_id;
+      const st = called.has(id) ? 401 : expired.has(id) ? 402 : 400;
+      return send({ status: "OK", status_code: 100, check_status: st, check_status_text: String(st) });
+    }
+    res.statusCode = 404; send({ status: "ERROR" });
+  });
+});
+const mockPort = await freePort();
+await new Promise((r) => mock.listen(mockPort, "127.0.0.1", r));
+const MOCK = `http://127.0.0.1:${mockPort}`;
+const callFromPhone = (providerId) => fetch(`${MOCK}/__call?check_id=${encodeURIComponent(providerId)}`);
+
 const dir = mkdtempSync(join(tmpdir(), "ordius-pb-"));
 const port = await freePort();
 const BASE = `http://127.0.0.1:${port}`;
-// Звонков в тестах нет: тестовый провайдер, код всегда TEST_CODE.
-const TEST_CODE = "4321";
 const env = { ...process.env, PB_ENCRYPTION_KEY: "abcdefghijklmnopqrstuvwxyz012345",
-  ORDIUS_PHONE_PROVIDER: "test", ORDIUS_TEST_CODE: TEST_CODE, ORDIUS_PHONE_IP_HOURLY: "1000" };
+  SMSRU_API_ID: SMSRU_KEY, ORDIUS_SMSRU_BASE: MOCK, ORDIUS_PHONE_IP_HOURLY: "1000" };
 const args = [`--dir=${dir}/pb_data`, `--migrationsDir=${ROOT}/pb_migrations`, `--hooksDir=${ROOT}/pb_hooks`, "--encryptionEnv=PB_ENCRYPTION_KEY"];
 execFileSync(PB, ["superuser", "upsert", "admin@test.local", "Adm1nPassw0rd!", ...args], { env, stdio: "ignore" });
 const srv = spawn(PB, ["serve", `--http=127.0.0.1:${port}`, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
 let srvLog = "";
 srv.stdout.on("data", (d) => { srvLog += d; });
 srv.stderr.on("data", (d) => { srvLog += d; });
-const stop = () => { try { srv.kill(); } catch (_) {} rmSync(dir, { recursive: true, force: true }); };
+const stop = () => { try { srv.kill(); } catch (_) {} try { mock.close(); } catch (_) {} rmSync(dir, { recursive: true, force: true }); };
 process.on("exit", stop);
 
 for (let i = 0; i < 100; i++) {
@@ -72,21 +108,25 @@ const su = (await api("POST", "/api/collections/_superusers/auth-with-password",
 const settings = (await api("GET", "/api/settings", { token: su })).json;
 const labels = settings.rateLimits.rules.map((r) => r.label);
 check("ограничения частоты: стандартные правила на месте и добавлены коды и звонки",
-  settings.rateLimits.enabled && ["*:auth", "POST /api/ordius/join", "POST /api/ordius/password-reset", "POST /api/ordius/phone/", "POST /api/ordius/signup"]
+  settings.rateLimits.enabled && ["*:auth", "POST /api/ordius/join", "POST /api/ordius/password-reset", "POST /api/ordius/phone/start",
+    "POST /api/ordius/phone/verify", "POST /api/ordius/phone/status", "POST /api/ordius/signup"]
     .every((l) => labels.includes(l)), labels);
 check("в журнале запросов нет IP, хранится 14 дней", settings.logs.logIP === false && settings.logs.maxDays === 14, settings.logs);
 await api("PATCH", "/api/settings", { token: su, body: { rateLimits: { enabled: false } } });
 
 const PASS = "Test-passw0rd-123";
-// Подтверждение номера: звонок → 4 цифры → билет.
-const phoneStart = (phone, purpose, token) => api("POST", "/api/ordius/phone/start", { token, body: { phone, purpose } });
+// Подтверждение номера. Основной путь: человек звонит на выданный номер → статус «verified» → билет.
+const phoneStart = (phone, purpose, token, method) => api("POST", "/api/ordius/phone/start", { token, body: { phone, purpose, method } });
+const phoneStatus = (check) => api("POST", "/api/ordius/phone/status", { body: { check } });
 const phoneVerify = (check, code) => api("POST", "/api/ordius/phone/verify", { body: { check, code } });
+const providerIdOf = async (check) => (await view("phone_checks", check, su)).json.call_id;
 async function ticketFor(phone, purpose, token) {
   const s1 = await phoneStart(phone, purpose, token);
   if (!is2xx(s1)) throw new Error(`phone/start ${phone} ${purpose}: ${s1.text}`);
-  const s2 = await phoneVerify(s1.json.check, TEST_CODE);
-  if (!is2xx(s2)) throw new Error(`phone/verify ${phone}: ${s2.text}`);
-  return s2.json.ticket;
+  await callFromPhone(await providerIdOf(s1.json.check));
+  const s2 = await phoneStatus(s1.json.check);
+  if (!is2xx(s2) || s2.json.status !== "verified") throw new Error(`phone/status ${phone}: ${s2.text}`);
+  return s1.json.ticket;
 }
 async function signup(name, phone) {
   const r = await api("POST", "/api/ordius/signup", { body: { ticket: await ticketFor(phone, "signup"), name, password: PASS } });
@@ -104,30 +144,65 @@ check("зарегистрироваться без подтверждения н
 check("неверный номер не принимается", (await phoneStart("12345", "signup")).status === 400);
 check("неизвестная цель проверки не принимается", (await phoneStart("+79230000099", "spam")).status === 400);
 
+check("иностранный номер не принимается — нужен российский мобильный", (await phoneStart("+380501234567", "signup")).status === 400);
+check("городской номер не принимается", (await phoneStart("+73832000000", "signup")).status === 400);
+check("неизвестный способ проверки не принимается", (await phoneStart("+79230000099", "signup", null, "sms")).status === 400);
+
+// основной способ: человек звонит сам
 const st = await phoneStart("+7 923 000-00-01", "signup");
-check("звонок заказан, в ответе нет кода", is2xx(st) && st.json.check && st.json.digits === 4 && !JSON.stringify(st.json).includes(TEST_CODE), st.json);
-check("чужие цифры не подходят", (await phoneVerify(st.json.check, "0000")).status === 400);
-const okv = await phoneVerify(st.json.check, TEST_CODE);
-check("верные цифры дают билет", is2xx(okv) && okv.json.ticket && okv.json.phone === "+79230000001", okv.json);
-check("код одноразовый", (await phoneVerify(st.json.check, TEST_CODE)).status === 400);
-check("регистрация по чужому билету (вход) не проходит",
+check("выдан номер, на который позвонить", is2xx(st) && st.json.method === "callcheck" && st.json.call_phone === "+78005553535" &&
+  st.json.call_phone_pretty && st.json.ticket && st.json.ticket.length >= 40, st.json);
+const sentAdd = seen.at(-1);
+check("запрос к SMS.ru: ключ, номер без «+», без адреса человека", sentAdd.path === "/callcheck/add" && sentAdd.method === "POST" &&
+  sentAdd.params.api_id === SMSRU_KEY && sentAdd.params.phone === "79230000001" && sentAdd.params.ip === undefined, sentAdd);
+check("до звонка — ждём", (await phoneStatus(st.json.check)).json.status === "waiting");
+check("до звонка билет не действует",
+  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS } })).status === 400);
+const polls = seen.length;
+await phoneStatus(st.json.check);
+check("SMS.ru опрашивается не чаще раза в 2 секунды", seen.length === polls);
+await callFromPhone(await providerIdOf(st.json.check));
+await new Promise((r) => setTimeout(r, 2100));
+check("после звонка — подтверждено", (await phoneStatus(st.json.check)).json.status === "verified");
+check("по проверке «звонок с кодом» цифры не принимаются", (await phoneVerify(st.json.check, TEST_CODE)).status === 400);
+check("регистрация по чужому билету не проходит",
   (await api("POST", "/api/ordius/signup", { body: { ticket: "x".repeat(40), name: "Иван", password: PASS } })).status === 400);
 check("короткий пароль не принимается",
-  (await api("POST", "/api/ordius/signup", { body: { ticket: okv.json.ticket, name: "Иван Петров", password: "123" } })).status === 400);
-const regA = await api("POST", "/api/ordius/signup", { body: { ticket: okv.json.ticket, name: "Иван Петров", password: PASS } });
+  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: "123" } })).status === 400);
+const regA = await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS } });
 check("регистрация по подтверждённому номеру — сразу вход", is2xx(regA) && regA.json.token && regA.json.record.phone === "+79230000001", regA.json);
 check("билет одноразовый",
-  (await api("POST", "/api/ordius/signup", { body: { ticket: okv.json.ticket, name: "Иван Второй", password: PASS } })).status === 400);
+  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Второй", password: PASS } })).status === 400);
 check("на занятый номер второй раз не зарегистрироваться", (await phoneStart("89230000001", "signup")).status === 400);
+const stx = await phoneStart("+79230000096", "signup");
+await fetch(`${MOCK}/__expire?check_id=${encodeURIComponent(await providerIdOf(stx.json.check))}`);
+check("не позвонил вовремя — проверка сгорела", (await phoneStatus(stx.json.check)).json.status === "expired");
+check("по сгоревшей проверке не зарегистрироваться",
+  (await api("POST", "/api/ordius/signup", { body: { ticket: stx.json.ticket, name: "Опоздал", password: PASS } })).status === 400);
+
+// запасной способ: робот звонит, человек вводит последние 4 цифры
+const sc = await phoneStart("+79230000095", "signup", null, "call");
+check("робот позвонил, в ответе нет кода и билета", is2xx(sc) && sc.json.method === "call" && sc.json.digits === 4 &&
+  !sc.json.ticket && !JSON.stringify(sc.json).includes(TEST_CODE), sc.json);
+const sentCall = seen.at(-1);
+check("звонок с кодом: ключ, номер, адрес человека", sentCall.path === "/code/call" && sentCall.params.api_id === SMSRU_KEY &&
+  sentCall.params.phone === "79230000095" && sentCall.params.ip === "127.0.0.1", sentCall);
+check("чужие цифры не подходят", (await phoneVerify(sc.json.check, "0000")).status === 400);
+const okv = await phoneVerify(sc.json.check, TEST_CODE);
+check("верные цифры дают билет", is2xx(okv) && okv.json.ticket && okv.json.phone === "+79230000095", okv.json);
+check("код одноразовый", (await phoneVerify(sc.json.check, TEST_CODE)).status === 400);
+check("регистрация по билету после звонка с кодом", is2xx(await api("POST", "/api/ordius/signup",
+  { body: { ticket: okv.json.ticket, name: "Олег Запасной", password: PASS } })));
+check("у проверки «звонок с кодом» статуса звонка нет", (await phoneStatus(sc.json.check)).status === 404);
 
 // попытки: после 5 неверных проверка сгорает
-const st5 = await phoneStart("+79230000098", "signup");
+const st5 = await phoneStart("+79230000098", "signup", null, "call");
 for (let i = 0; i < 5; i++) await phoneVerify(st5.json.check, "1111");
 check("после 5 неверных попыток верный код уже не принимается", (await phoneVerify(st5.json.check, TEST_CODE)).status === 400);
-// лимит звонков на один номер: не больше 3 в час
+// лимит на один номер: не больше 3 проверок в час
 await phoneStart("+79230000098", "signup");
 await phoneStart("+79230000098", "signup");
-check("не больше 3 звонков на номер в час", (await phoneStart("+79230000098", "signup")).status === 429);
+check("не больше 3 проверок на номер в час", (await phoneStart("+79230000098", "signup")).status === 429);
 
 await signup("Пётр Лютиков", "+79230000002");
 await signup("Дмитрий Водитель", "8 (923) 000-00-03");
@@ -482,14 +557,13 @@ for (let i = 0; i < 4; i++) await create("companies", B.token, { name: "Б-" + i
 const sixth = await create("companies", B.token, { name: "Б-лишняя" });
 check("не больше 5 компаний на человека", sixth.status === 400 && /5 компаний/.test(sixth.text), sixth.json);
 
-// ---------- настоящий провайдер звонков: запрос к SMS.ru и сервер без ключа ----------
-// Поднимаем ещё два PocketBase: с ключом (SMS.ru подменён местной заглушкой) и без ключа.
+// ---------- сервер без ключа SMS.ru и с неверным ключом ----------
+// Поднимаем ещё два PocketBase: без ключа и с ключом, который «SMS.ru» не принимает.
 async function extraServer(extraEnv) {
   const d = mkdtempSync(join(tmpdir(), "ordius-pb-"));
   const p = await freePort();
   const a = [`--dir=${d}/pb_data`, `--migrationsDir=${ROOT}/pb_migrations`, `--hooksDir=${ROOT}/pb_hooks`, "--encryptionEnv=PB_ENCRYPTION_KEY"];
   const en = { ...process.env, PB_ENCRYPTION_KEY: "abcdefghijklmnopqrstuvwxyz012345", ...extraEnv };
-  delete en.ORDIUS_PHONE_PROVIDER;
   const proc = spawn(PB, ["serve", `--http=127.0.0.1:${p}`, ...a], { env: en, stdio: "ignore" });
   for (let i = 0; i < 100; i++) {
     try { if ((await fetch(`http://127.0.0.1:${p}/api/health`)).ok) break; } catch (_) {}
@@ -503,29 +577,28 @@ async function extraServer(extraEnv) {
   };
   return { call, stop: () => { try { proc.kill(); } catch (_) {} rmSync(d, { recursive: true, force: true }); } };
 }
-const http = await import("node:http");
-const seen = [];
-const mock = http.createServer((req, res) => {
-  let b = ""; req.on("data", (c) => { b += c; }); req.on("end", () => {
-    seen.push({ url: req.url, method: req.method, params: Object.fromEntries(new URLSearchParams(b)) });
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ status: "OK", code: "1435", call_id: "201737-542", cost: 0.4, balance: 99.6 }));
-  });
-});
-const mockPort = await freePort();
-await new Promise((r) => mock.listen(mockPort, "127.0.0.1", r));
-const withKey = await extraServer({ SMSRU_API_ID: "TEST-API-ID", ORDIUS_SMSRU_URL: `http://127.0.0.1:${mockPort}/code/call` });
-const real1 = await withKey.call("/api/ordius/phone/start", { phone: "8 923 111-22-33", purpose: "signup" });
-check("запрос к SMS.ru: ключ, номер без «+», адрес человека", is2xx(real1) && seen.length === 1 &&
-  seen[0].method === "POST" && seen[0].params.api_id === "TEST-API-ID" && seen[0].params.phone === "79231112233" &&
-  seen[0].params.ip === "127.0.0.1" && seen[0].params.json === "1", { real1: real1.json, seen });
-check("код из ответа SMS.ru подходит", is2xx(await withKey.call("/api/ordius/phone/verify", { check: real1.json.check, code: "1435" })));
-withKey.stop();
-mock.close();
-const noKey = await extraServer({});
+const noKey = await extraServer({ ORDIUS_SMSRU_BASE: MOCK });
 const nk = await noKey.call("/api/ordius/phone/start", { phone: "+79231112233", purpose: "signup" });
-check("без ключа SMS.ru сервер честно отвечает «не настроено», тестовый код не работает", nk.status === 503, nk.json);
+check("без ключа SMS.ru сервер честно отвечает «не настроено»", nk.status === 503, nk.json);
+const nkc = await noKey.call("/api/ordius/phone/start", { phone: "+79231112233", purpose: "signup", method: "call" });
+check("без ключа и звонок с кодом не притворяется, что звонит", nkc.status === 503, nkc.json);
 noKey.stop();
+// здесь ограничения частоты включены, как на сервере: ожидание звонка не должно упираться в лимит
+const limited = await extraServer({ SMSRU_API_ID: SMSRU_KEY, ORDIUS_SMSRU_BASE: MOCK });
+const ls = await limited.call("/api/ordius/phone/start", { phone: "+79231112244", purpose: "signup" });
+let pollsOk = is2xx(ls);
+for (let i = 0; i < 60 && pollsOk; i++) pollsOk = (await limited.call("/api/ordius/phone/status", { check: ls.json.check })).status === 200;
+check("ожидание звонка (60 опросов подряд) не упирается в лимит частоты", pollsOk, ls.json);
+let startsLimited = false;
+for (let i = 0; i < 25 && !startsLimited; i++) {
+  startsLimited = (await limited.call("/api/ordius/phone/start", { phone: `+7923111${String(3000 + i)}`, purpose: "signup" })).status === 429;
+}
+check("с одного адреса — не больше 20 проверок подряд", startsLimited);
+limited.stop();
+const badKey = await extraServer({ SMSRU_API_ID: "WRONG", ORDIUS_SMSRU_BASE: MOCK });
+const bk = await badKey.call("/api/ordius/phone/start", { phone: "+79231112233", purpose: "signup" });
+check("SMS.ru отказал — понятная ошибка, проверка не создана", bk.status === 400 && /Не получилось/.test(bk.text), bk.json);
+badKey.stop();
 
 console.log(`\n${passed} проверок прошло, ${failed} не прошло`);
 if (failed) console.log("\n--- журнал PocketBase (конец) ---\n" + srvLog.slice(-4000));

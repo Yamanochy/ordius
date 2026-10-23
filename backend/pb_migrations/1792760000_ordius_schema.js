@@ -33,6 +33,8 @@ migrate((app) => {
     ({ name, type: "relation", collectionId, maxSelect: 1, cascadeDelete: false, ...opts });
   const json = (name) => ({ name, type: "json", maxSize: 100000 });
   const PHONE = "^\\+[0-9]{10,15}$";
+  // аккаунт — только российский мобильный (вход по номеру российского оператора, 406-ФЗ)
+  const RU_MOBILE = "^\\+79[0-9]{9}$";
 
   const make = (name, fields, indexes = []) => {
     const c = new Collection({ type: "base", name, fields, indexes });
@@ -44,7 +46,7 @@ migrate((app) => {
   const users = app.findCollectionByNameOrId("users");
   // Не hidden: скрытое поле PocketBase не принимает от клиента даже при регистрации.
   // Чужим телефон не отдаётся — его убирает хук onRecordEnrich (виден только самому человеку).
-  users.fields.add(new TextField({ name: "phone", pattern: PHONE, max: 16 }));
+  users.fields.add(new TextField({ name: "phone", pattern: RU_MOBILE, max: 12 }));
   const email = users.fields.getByName("email");
   email.required = false;
   const name = users.fields.getByName("name");
@@ -55,11 +57,15 @@ migrate((app) => {
   app.save(users);
 
   // ---------- подтверждение номера звонком (только для сервера: правил доступа нет) ----------
-  // Каждая запись — один звонок: номер, цель, код до проверки, попытки, билет после проверки.
+  // Каждая запись — одна проверка номера: способ, цель, код или номер для звонка, попытки, билет.
   // Хранится 30 дней (нужно для лимитов и разбора злоупотреблений), потом удаляется задачей по расписанию.
   make("phone_checks", [
-    text("phone", { required: true, pattern: PHONE, max: 16 }),
+    text("phone", { required: true, pattern: RU_MOBILE, max: 12 }),
     select("purpose", ["signup", "login", "reset", "change"], { required: true }),
+    // callcheck — человек звонит сам (основной способ), call — робот звонит человеку (запасной)
+    select("method", ["callcheck", "call"], { required: true }),
+    text("call_phone", { max: 16 }),
+    date("last_checked"),
     select("status", ["sent", "verified", "used", "failed"], { required: true }),
     text("code", { max: 8 }),
     int("attempts", { min: 0 }),
