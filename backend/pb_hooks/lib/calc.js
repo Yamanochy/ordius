@@ -47,13 +47,18 @@ function pickFactor(factors, kind, date) {
   return best ? best.factor_permille : 1000;
 }
 
-const UNIT_LABEL = { hour: "час", shift: "смена", trip: "рейс", tkm: "т·км" };
+const UNIT_LABEL = {
+  hour: "час", shift: "смена", trip: "рейс", tkm: "т·км", km: "км", lin_m: "п.м.", sq_m: "м²", cu_m: "м³",
+  ton: "т", piece: "шт", month: "месяц",
+};
 
-// Количество для расчёта по строке смены.
+// Количество для оплаты по строке смены (в единице строки).
 function quantity(entry) {
   switch (entry.unit) {
     case "tkm": return (Number(entry.tons) || 0) * (Number(entry.km) || 0);
     case "shift": return Number(entry.quantity) || 1;
+    case "km": return Number(entry.km) || Number(entry.quantity) || 0;
+    case "ton": return Number(entry.tons) || Number(entry.quantity) || 0;
     default: return Number(entry.quantity) || 0;
   }
 }
@@ -83,7 +88,7 @@ function calcShift(shift, entries, rates, factors) {
     amount = Math.round(amount);
     total += amount;
     lines.push({
-      entry: e.id, unit: e.unit, quantity: qty, rate: rate.id, rate_kop: rate.amount_kop,
+      entry: e.id, vehicle: e.vehicle || "", unit: e.unit, quantity: qty, rate: rate.id, rate_kop: rate.amount_kop,
       factors_permille: factors_, amount_kop: amount,
     });
   }
@@ -94,6 +99,84 @@ function calcShift(shift, entries, rates, factors) {
     throw err;
   }
   return { amount_kop: total, lines, calculated_on: shift.date };
+}
+
+// ---------- выручка: цены заказчика по позициям контракта ----------
+
+// Количество в единице позиции контракта. Если единицы оплаты и выставления разные (водителю — часы,
+// заказчику — погонные метры), количество для заказчика берётся из bill_qty строки.
+function billQuantity(entry, unit) {
+  const bq = Number(entry.bill_qty) || 0;
+  if (bq > 0) return bq;
+  if (unit === entry.unit) return quantity(entry);
+  const tons = Number(entry.tons) || 0;
+  const km = Number(entry.km) || 0;
+  if (unit === "tkm" && tons > 0 && km > 0) return tons * km;
+  if (unit === "km" && km > 0) return km;
+  if (unit === "ton" && tons > 0) return tons;
+  return 0;
+}
+
+// Позиция контракта для строки: выбранная явно или подобранная по единице и технике
+// (своя машина точнее вида техники, вид техники точнее «любой»). Две равные — выбор за человеком.
+function pickItem(items, entry, vehicleKind) {
+  if (entry.contract_item) {
+    const it = items.find((i) => i.id === entry.contract_item);
+    return it ? { item: it } : { reason: "позиция не из контракта этой смены" };
+  }
+  let best = [];
+  let bestScore = -1;
+  for (const it of items) {
+    if (it.active === false || it.unit === "month" || it.unit !== entry.unit) continue;
+    if (it.vehicle && it.vehicle !== entry.vehicle) continue;
+    if (it.vehicle_kind && it.vehicle_kind !== vehicleKind) continue;
+    const score = it.vehicle ? 2 : it.vehicle_kind ? 1 : 0;
+    if (score > bestScore) { best = [it]; bestScore = score; } else if (score === bestScore) best.push(it);
+  }
+  if (best.length === 1) return { item: best[0] };
+  if (best.length > 1) return { reason: "подходят несколько позиций — выберите позицию в строке" };
+  return { reason: `в контракте нет позиции «${UNIT_LABEL[entry.unit] || entry.unit}» для этой техники` };
+}
+
+function pickPrice(prices, itemId, date) {
+  let best = null;
+  for (const p of prices) {
+    if (p.item !== itemId || !activeOn(p, date)) continue;
+    if (!best || day(p.valid_from) > day(best.valid_from)) best = p;
+  }
+  return best;
+}
+
+// Выручка по смене. Не мешает подтверждению: чего не хватает, попадает в missing,
+// и реестр для заказчика показывает это как «не выставлено».
+// kinds — { id техники: вид техники }.
+function billShift(shift, entries, items, prices, kinds) {
+  const lines = [];
+  const missing = [];
+  let total = 0;
+  for (const e of entries) {
+    const picked = pickItem(items, e, kinds[e.vehicle] || "");
+    if (!picked.item) { missing.push({ entry: e.id, vehicle: e.vehicle || "", reason: picked.reason }); continue; }
+    const it = picked.item;
+    const qty = billQuantity(e, it.unit);
+    if (!(qty > 0)) {
+      missing.push({ entry: e.id, vehicle: e.vehicle || "", item: it.id,
+        reason: `не указано количество в единице позиции (${UNIT_LABEL[it.unit] || it.unit})` });
+      continue;
+    }
+    const price = pickPrice(prices, it.id, shift.date);
+    if (!price) {
+      missing.push({ entry: e.id, vehicle: e.vehicle || "", item: it.id, reason: `нет цены на ${day(shift.date)}` });
+      continue;
+    }
+    const amount = Math.round(qty * price.price_kop);
+    total += amount;
+    lines.push({
+      entry: e.id, vehicle: e.vehicle || "", item: it.id, item_name: it.name, unit: it.unit, quantity: qty,
+      price_kop: price.price_kop, vat: price.vat || "", amount_kop: amount,
+    });
+  }
+  return { amount_kop: total, lines, missing, status: missing.length ? "incomplete" : "ok" };
 }
 
 // Оклад за период: каждая месячная ставка считается пропорционально дням периода внутри её действия.
@@ -142,4 +225,14 @@ function payrollSummary({ shifts, monthRates, adjustments, payouts, from, to }) 
   };
 }
 
-module.exports = { day, activeOn, pickRate, pickFactor, quantity, calcShift, salaryForPeriod, payrollSummary };
+// Абонентская позиция контракта («в месяц») за период — пропорционально дням, по действующей цене.
+function monthlyForPeriod(item, prices, from, to) {
+  const own = prices.filter((p) => p.item === item.id).map((p) => ({ unit: "month", amount_kop: p.price_kop,
+    valid_from: p.valid_from, valid_to: p.valid_to }));
+  return salaryForPeriod(own, from, to);
+}
+
+module.exports = {
+  UNIT_LABEL, day, activeOn, pickRate, pickFactor, quantity, calcShift, salaryForPeriod, payrollSummary,
+  billQuantity, pickItem, pickPrice, billShift, monthlyForPeriod,
+};

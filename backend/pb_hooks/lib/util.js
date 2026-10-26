@@ -73,4 +73,15 @@ function rejectServerFields(e, fields) {
   if (sent.length) throw new BadRequestError("Эти поля заполняет сервер: " + sent.join(", "));
 }
 
-module.exports = { normalizePhone, membershipOf, hasRole, code, nowIso, audit, rejectServerFields };
+// JSON-поле записи как обычный объект JS. record.get() отдаёт сырые байты (types.JSONRaw):
+// по ним нельзя пройти циклом и нельзя читать свойства.
+function jsonOf(record, field, fallback) {
+  try {
+    const v = JSON.parse(record.getString(field) || "null");
+    return v === null || v === undefined ? fallback : v;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+module.exports = { normalizePhone, membershipOf, hasRole, code, nowIso, audit, rejectServerFields, jsonOf };

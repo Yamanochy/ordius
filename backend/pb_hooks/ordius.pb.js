@@ -588,8 +588,10 @@ onRecordUpdateRequest(guardOwners, "memberships");
 
 onRecordCreateRequest((e) => {
   const { rejectServerFields, audit } = require(`${__hooks}/lib/util.js`);
+  const billing = require(`${__hooks}/lib/billing.js`);
   rejectServerFields(e, ["amount_kop", "calc", "confirmed_by", "confirmed_at", "created_by"]);
   e.record.set("created_by", e.auth ? e.auth.id : "");
+  billing.contractDefaults(e.app, e.record);
   e.next();
   audit(e.app, "create", e.record, e.auth);
 }, "shifts");
@@ -597,9 +599,11 @@ onRecordCreateRequest((e) => {
 onRecordUpdateRequest((e) => {
   const { rejectServerFields, audit, nowIso } = require(`${__hooks}/lib/util.js`);
   const calc = require(`${__hooks}/lib/calc.js`);
+  const billing = require(`${__hooks}/lib/billing.js`);
   rejectServerFields(e, ["amount_kop", "calc", "confirmed_by", "confirmed_at", "created_by"]);
   const before = e.record.original().get("status");
   const after = e.record.get("status");
+  billing.contractDefaults(e.app, e.record);
 
   if (after === "confirmed" && before !== "confirmed") {
     const shift = e.record;
@@ -636,6 +640,12 @@ onRecordUpdateRequest((e) => {
     throw new BadRequestError("Укажите причину, по которой смена возвращена");
   }
   e.next();
+  // Выручка по контракту: считается при подтверждении и не мешает ему — пробелы видны в реестре.
+  if (after === "confirmed" && before !== "confirmed") {
+    try { billing.saveBill(e.app, e.record, calc); } catch (err) { e.app.logger().error("bill failed", "shift", e.record.id, "error", String(err)); }
+  } else if (before === "confirmed" && after !== "confirmed") {
+    billing.deleteBill(e.app, e.record.id);
+  }
   audit(e.app, "update", e.record, e.auth, { status: { from: before, to: after } });
 }, "shifts");
 
@@ -645,14 +655,28 @@ onRecordDeleteRequest((e) => {
   audit(e.app, "delete", e.record, e.auth);
 }, "shifts");
 
-// Строки смены: проверка количества по единице расчёта.
+// Строки смены: количество по единице расчёта; позиция — из контракта этой смены.
 const checkEntry = (e) => {
-  const unit = e.record.get("unit");
-  if (unit === "tkm" && (!(e.record.get("tons") > 0) || !(e.record.get("km") > 0))) {
+  const r = e.record;
+  const unit = r.get("unit");
+  const q = r.get("quantity") > 0;
+  if (unit === "tkm" && (!(r.get("tons") > 0) || !(r.get("km") > 0))) {
     throw new BadRequestError("Для тонно-километров укажите тонны и километры");
   }
-  if ((unit === "hour" || unit === "trip") && !(e.record.get("quantity") > 0)) {
-    throw new BadRequestError(unit === "hour" ? "Укажите часы" : "Укажите число рейсов");
+  const need = { hour: "Укажите часы", trip: "Укажите число рейсов", lin_m: "Укажите погонные метры",
+    sq_m: "Укажите квадратные метры", cu_m: "Укажите кубометры", piece: "Укажите количество" };
+  if (need[unit] && !q) throw new BadRequestError(need[unit]);
+  if (unit === "km" && !q && !(r.get("km") > 0)) throw new BadRequestError("Укажите километры");
+  if (unit === "ton" && !q && !(r.get("tons") > 0)) throw new BadRequestError("Укажите тонны");
+  if (r.get("contract_item")) {
+    const billing = require(`${__hooks}/lib/billing.js`);
+    let item = null, shift = null;
+    try { item = e.app.findRecordById("contract_items", r.get("contract_item")); } catch (_) { /* проверит валидация */ }
+    try { shift = e.app.findRecordById("shifts", r.get("shift")); } catch (_) { /* проверит валидация */ }
+    const contract = shift ? billing.contractOf(e.app, shift) : "";
+    if (item && contract && item.get("contract") !== contract) {
+      throw new BadRequestError("Эта позиция — из другого контракта, не того, по которому идёт смена");
+    }
   }
   e.next();
 };
@@ -692,7 +716,7 @@ for (const c of ["adjustments", "payouts"]) {
   onRecordUpdateRequest(moneyUpdate, c);
   onRecordDeleteRequest(moneyDelete, c);
 }
-for (const c of ["rates", "rate_factors"]) {
+for (const c of ["rates", "rate_factors", "contracts", "contract_items", "contract_prices", "fuel_cards"]) {
   onRecordCreateRequest((e) => { const { audit } = require(`${__hooks}/lib/util.js`); e.next(); audit(e.app, "create", e.record, e.auth); }, c);
   onRecordUpdateRequest((e) => { const { audit } = require(`${__hooks}/lib/util.js`); e.next(); audit(e.app, "update", e.record, e.auth); }, c);
   onRecordDeleteRequest((e) => { const { audit } = require(`${__hooks}/lib/util.js`); e.next(); audit(e.app, "delete", e.record, e.auth); }, c);
@@ -813,3 +837,281 @@ routerAdd("GET", "/api/ordius/payroll", (e) => {
   }
   return e.json(200, { company: companyId, from, to, rows });
 }, $apis.requireAuth("users"));
+
+// ---------- выручка: пересчёт, реестр для заказчика, отчёт по деньгам ----------
+// Пересчитать выручку подтверждённых смен за период (например, после того как внесли недостающую цену).
+// POST /api/ordius/bills/recalc { company, from, to } — владелец или руководитель.
+routerAdd("POST", "/api/ordius/bills/recalc", (e) => {
+  const { membershipOf, hasRole } = require(`${__hooks}/lib/util.js`);
+  const calc = require(`${__hooks}/lib/calc.js`);
+  const billing = require(`${__hooks}/lib/billing.js`);
+  const body = e.requestInfo().body || {};
+  const companyId = String(body.company || "");
+  const from = String(body.from || "").slice(0, 10);
+  const to = String(body.to || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    throw new BadRequestError("Укажите период: from и to в виде ГГГГ-ММ-ДД");
+  }
+  if (!hasRole(membershipOf(e.app, companyId, e.auth.id), ["owner", "manager"])) {
+    throw new ForbiddenError("Только владелец или руководитель");
+  }
+  const shifts = e.app.findRecordsByFilter("shifts",
+    "company = {:c} && status = 'confirmed' && date >= {:from} && date <= {:to}", "date", 0, 0,
+    { c: companyId, from: from + " 00:00:00.000Z", to: to + " 23:59:59.999Z" });
+  let incomplete = 0;
+  for (const sh of shifts) {
+    const bill = billing.saveBill(e.app, sh, calc);
+    if (bill && bill.get("status") === "incomplete") incomplete++;
+  }
+  return e.json(200, { shifts: shifts.length, incomplete });
+}, $apis.requireAuth("users"));
+
+// Реестр выполненных работ по контракту — основа акта и сверки с заказчиком.
+// GET /api/ordius/registry?company=…&contract=…&from=…&to=…[&format=csv] — владелец, руководитель, бухгалтер.
+routerAdd("GET", "/api/ordius/registry", (e) => {
+  const { membershipOf, hasRole, jsonOf } = require(`${__hooks}/lib/util.js`);
+  const calc = require(`${__hooks}/lib/calc.js`);
+  const billing = require(`${__hooks}/lib/billing.js`);
+  const q = e.requestInfo().query || {};
+  const companyId = String(q.company || "");
+  const from = String(q.from || "").slice(0, 10);
+  const to = String(q.to || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    throw new BadRequestError("Укажите период: from и to в виде ГГГГ-ММ-ДД");
+  }
+  if (!hasRole(membershipOf(e.app, companyId, e.auth.id), ["owner", "manager", "accountant"])) {
+    throw new ForbiddenError("Реестр видят владелец, руководитель и бухгалтер");
+  }
+  let contract = null;
+  try {
+    contract = e.app.findFirstRecordByFilter("contracts", "id = {:id} && company = {:c}", { id: String(q.contract || ""), c: companyId });
+  } catch (_) { /* нет */ }
+  if (!contract) throw new NotFoundError("Контракт не найден");
+  const customer = e.app.findRecordById("customers", contract.get("customer"));
+
+  const names = (col, filter) => {
+    const m = {};
+    for (const r of e.app.findRecordsByFilter(col, filter, "", 0, 0, { c: companyId })) m[r.id] = r;
+    return m;
+  };
+  const sites = names("sites", "company = {:c}");
+  const vehicles = names("vehicles", "company = {:c}");
+  const members = names("memberships", "company = {:c}");
+  const vname = (id) => (vehicles[id] ? [vehicles[id].get("name"), vehicles[id].get("plate")].filter(Boolean).join(" ") : "");
+  const vatOf = (amount, vat) => (/^\d+$/.test(String(vat || "")) && Number(vat) > 0
+    ? Math.round(amount * Number(vat) / (100 + Number(vat))) : 0);
+
+  const range = { k: contract.id, from: from + " 00:00:00.000Z", to: to + " 23:59:59.999Z" };
+  const bills = e.app.findRecordsByFilter("shift_bills", "contract = {:k} && date >= {:from} && date <= {:to}", "date", 0, 0, range);
+  const lines = [];
+  const missing = [];
+  for (const b of bills) {
+    let sh = null;
+    try { sh = e.app.findRecordById("shifts", b.get("shift")); } catch (_) { continue; }
+    const base = { date: b.getString("date").slice(0, 10), shift: sh.id, site: sites[sh.get("site")] ? sites[sh.get("site")].get("name") : "",
+      driver: members[sh.get("member")] ? members[sh.get("member")].get("display_name") : "" };
+    for (const l of jsonOf(b, "lines", [])) {
+      lines.push(Object.assign({}, base, { vehicle: vname(l.vehicle), item: l.item, item_name: l.item_name, unit: l.unit,
+        unit_label: calc.UNIT_LABEL[l.unit] || l.unit, quantity: l.quantity, price_kop: l.price_kop, vat: l.vat,
+        amount_kop: l.amount_kop, vat_kop: vatOf(l.amount_kop, l.vat) }));
+    }
+    for (const m of jsonOf(b, "missing", [])) missing.push(Object.assign({}, base, { vehicle: vname(m.vehicle), reason: m.reason }));
+  }
+  // абонентские позиции («в месяц») — пропорционально дням периода
+  const items = billing.loadItems(e.app, contract.id);
+  const prices = billing.loadPrices(e.app, items.filter((i) => i.unit === "month").map((i) => i.id));
+  for (const it of items.filter((i) => i.unit === "month" && i.active !== false)) {
+    const amount = calc.monthlyForPeriod(it, prices, from, to);
+    if (!amount) continue;
+    const p = calc.pickPrice(prices, it.id, to) || {};
+    lines.push({ date: "", shift: "", site: "", driver: "", vehicle: "", item: it.id, item_name: it.name, unit: "month",
+      unit_label: "месяц", quantity: null, price_kop: p.price_kop || null, vat: p.vat || "", amount_kop: amount,
+      vat_kop: vatOf(amount, p.vat) });
+  }
+  const byItem = {};
+  for (const l of lines) {
+    const t = byItem[l.item] || (byItem[l.item] = { item: l.item, item_name: l.item_name, unit_label: l.unit_label, quantity: 0, amount_kop: 0, vat_kop: 0 });
+    t.quantity = Math.round((t.quantity + (l.quantity || 0)) * 1000) / 1000;
+    t.amount_kop += l.amount_kop;
+    t.vat_kop += l.vat_kop;
+  }
+  const total = lines.reduce((a, l) => a + l.amount_kop, 0);
+  const vatTotal = lines.reduce((a, l) => a + l.vat_kop, 0);
+  // выполнено по контракту за всё время — против цены контракта
+  const done = e.app.findRecordsByFilter("shift_bills", "contract = {:k}", "", 0, 0, { k: contract.id })
+    .reduce((a, b) => a + (b.get("amount_kop") || 0), 0);
+
+  if (q.format === "csv") {
+    const rub = (k) => (k / 100).toFixed(2).replace(".", ",");
+    const num = (v) => (v === null || v === undefined ? "" : String(v).replace(".", ","));
+    const esc = (v) => '"' + String(v === null || v === undefined ? "" : v).replace(/"/g, '""') + '"';
+    const out = [
+      [esc(`Реестр работ по контракту ${contract.get("number") || ""} «${contract.get("title")}»`)].join(";"),
+      [esc(`Заказчик: ${customer.get("name")}`), esc(`Период: ${from} — ${to}`)].join(";"),
+      "",
+      ["Дата", "Объект", "Техника", "Водитель", "Позиция", "Ед.", "Кол-во", "Цена, ₽", "Сумма, ₽", "в т.ч. НДС, ₽"].map(esc).join(";"),
+    ];
+    for (const l of lines) {
+      out.push([esc(l.date), esc(l.site), esc(l.vehicle), esc(l.driver), esc(l.item_name), esc(l.unit_label),
+        num(l.quantity), l.price_kop === null ? "" : rub(l.price_kop), rub(l.amount_kop), rub(l.vat_kop)].join(";"));
+    }
+    out.push("", [esc("Итого по позициям")].join(";"));
+    for (const t of Object.values(byItem)) {
+      out.push(["", "", "", "", esc(t.item_name), esc(t.unit_label), num(t.quantity), "", rub(t.amount_kop), rub(t.vat_kop)].join(";"));
+    }
+    out.push(["", "", "", "", esc("ИТОГО"), "", "", "", rub(total), rub(vatTotal)].join(";"));
+    if (missing.length) {
+      out.push("", esc("Не выставлено — нужно исправить"));
+      for (const m of missing) out.push([esc(m.date), esc(m.site), esc(m.vehicle), esc(m.driver), esc(m.reason)].join(";"));
+    }
+    e.response.header().set("Content-Type", "text/csv; charset=utf-8");
+    e.response.header().set("Content-Disposition", `attachment; filename="reestr-${from}_${to}.csv"`);
+    return e.string(200, "﻿" + out.join("\r\n") + "\r\n");
+  }
+  return e.json(200, {
+    contract: { id: contract.id, number: contract.get("number"), title: contract.get("title"), limit_kop: contract.get("limit_kop") || null },
+    customer: { id: customer.id, name: customer.get("name") },
+    from, to, lines, totals: Object.values(byItem), total_kop: total, vat_kop: vatTotal, missing, done_kop: done,
+  });
+}, $apis.requireAuth("users"));
+
+// Деньги за период: выручка по контрактам, оплата людям по сменам и разница между ними.
+// GET /api/ordius/revenue?company=…&from=…&to=…&group=customer|contract|site|vehicle — владелец, руководитель, бухгалтер.
+routerAdd("GET", "/api/ordius/revenue", (e) => {
+  const { membershipOf, hasRole, jsonOf } = require(`${__hooks}/lib/util.js`);
+  const q = e.requestInfo().query || {};
+  const companyId = String(q.company || "");
+  const from = String(q.from || "").slice(0, 10);
+  const to = String(q.to || "").slice(0, 10);
+  const group = String(q.group || "customer");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    throw new BadRequestError("Укажите период: from и to в виде ГГГГ-ММ-ДД");
+  }
+  if (["customer", "contract", "site", "vehicle"].indexOf(group) === -1) throw new BadRequestError("group: customer, contract, site или vehicle");
+  if (!hasRole(membershipOf(e.app, companyId, e.auth.id), ["owner", "manager", "accountant"])) {
+    throw new ForbiddenError("Деньги компании видят владелец, руководитель и бухгалтер");
+  }
+  const range = { c: companyId, from: from + " 00:00:00.000Z", to: to + " 23:59:59.999Z" };
+  const shifts = e.app.findRecordsByFilter("shifts",
+    "company = {:c} && status = 'confirmed' && date >= {:from} && date <= {:to}", "", 0, 0, range);
+  const shiftById = {};
+  for (const sh of shifts) shiftById[sh.id] = sh;
+  const bills = e.app.findRecordsByFilter("shift_bills", "company = {:c} && date >= {:from} && date <= {:to}", "", 0, 0, range);
+
+  const col = { customer: "customers", contract: "contracts", site: "sites", vehicle: "vehicles" }[group];
+  const nameOf = {};
+  for (const r of e.app.findRecordsByFilter(col, "company = {:c}", "", 0, 0, { c: companyId })) {
+    nameOf[r.id] = group === "contract" ? [r.get("number"), r.get("title")].filter(Boolean).join(" ")
+      : group === "vehicle" ? [r.get("name"), r.get("plate")].filter(Boolean).join(" ") : r.get("name");
+  }
+  const rows = {};
+  const row = (key) => rows[key] || (rows[key] = { key, name: key ? (nameOf[key] || "—") : "Без " + { customer: "заказчика",
+    contract: "контракта", site: "объекта", vehicle: "техники" }[group], bill_kop: 0, pay_kop: 0, shifts: {}, incomplete: 0 });
+
+  for (const sh of shifts) {
+    if (group === "vehicle") {
+      for (const l of jsonOf(sh, "calc", {}).lines || []) { const r = row(l.vehicle || ""); r.pay_kop += l.amount_kop || 0; r.shifts[sh.id] = 1; }
+    } else {
+      const r = row(sh.get(group) || "");
+      r.pay_kop += sh.get("amount_kop") || 0;
+      r.shifts[sh.id] = 1;
+    }
+  }
+  for (const b of bills) {
+    const sh = shiftById[b.get("shift")];
+    if (group === "vehicle") {
+      for (const l of jsonOf(b, "lines", [])) row(l.vehicle || "").bill_kop += l.amount_kop || 0;
+      if (b.get("status") === "incomplete") for (const m of jsonOf(b, "missing", [])) row(m.vehicle || "").incomplete++;
+    } else {
+      const key = group === "site" ? (sh ? sh.get("site") : "") : b.get(group) || "";
+      const r = row(key);
+      r.bill_kop += b.get("amount_kop") || 0;
+      if (b.get("status") === "incomplete") r.incomplete++;
+    }
+  }
+  const out = Object.values(rows).map((r) => ({ key: r.key, name: r.name, bill_kop: r.bill_kop, pay_kop: r.pay_kop,
+    margin_kop: r.bill_kop - r.pay_kop, shifts: Object.keys(r.shifts).length, incomplete: r.incomplete }))
+    .sort((a, b) => b.bill_kop - a.bill_kop || b.pay_kop - a.pay_kop);
+  const sum = (f) => out.reduce((a, r) => a + r[f], 0);
+  return e.json(200, { from, to, group, rows: out,
+    total: { bill_kop: sum("bill_kop"), pay_kop: sum("pay_kop"), margin_kop: sum("margin_kop") } });
+}, $apis.requireAuth("users"));
+
+// ---------- топливные карты: ПИН зашифрован, выдаётся отдельным запросом и попадает в журнал ----------
+onRecordCreateRequest((e) => {
+  const { rejectServerFields } = require(`${__hooks}/lib/util.js`);
+  rejectServerFields(e, ["pin_set"]);
+  e.record.set("pin_set", false);
+  e.next();
+}, "fuel_cards");
+onRecordUpdateRequest((e) => {
+  const { rejectServerFields } = require(`${__hooks}/lib/util.js`);
+  rejectServerFields(e, ["pin_set"]);
+  e.next();
+}, "fuel_cards");
+
+// Ключ шифрования ПИН выводится из ключа шифрования настроек PocketBase: отдельный секрет не нужен,
+// а при восстановлении из копии ключ приезжает вместе с базой.
+// POST /api/ordius/fuel-cards/{id}/pin { pin } — владелец или руководитель; пустой pin — стереть.
+routerAdd("POST", "/api/ordius/fuel-cards/{id}/pin", (e) => {
+  const { membershipOf, hasRole, audit } = require(`${__hooks}/lib/util.js`);
+  const card = e.app.findRecordById("fuel_cards", e.request.pathValue("id"));
+  if (!hasRole(membershipOf(e.app, card.get("company"), e.auth.id), ["owner", "manager"])) {
+    throw new ForbiddenError("ПИН задаёт владелец или руководитель");
+  }
+  const pin = String((e.requestInfo().body || {}).pin || "").trim();
+  if (pin && !/^\d{4,8}$/.test(pin)) throw new BadRequestError("ПИН — от 4 до 8 цифр");
+  const base = $os.getenv("PB_ENCRYPTION_KEY");
+  if (!base) throw new ApiError(503, "На сервере не задан ключ шифрования", null);
+  card.set("pin_enc", pin ? $security.encrypt(pin, $security.hs256("ordius-fuel-pin", base).slice(0, 32)) : "");
+  card.set("pin_set", !!pin);
+  e.app.save(card);
+  audit(e.app, "update", card, e.auth, { reason: pin ? "pin set" : "pin cleared" });
+  return e.json(200, { pin_set: !!pin });
+}, $apis.requireAuth("users"));
+
+// GET /api/ordius/fuel-cards/{id}/pin — владелец, руководитель или тот, за кем закреплена карта.
+routerAdd("GET", "/api/ordius/fuel-cards/{id}/pin", (e) => {
+  const { membershipOf, hasRole, audit } = require(`${__hooks}/lib/util.js`);
+  const card = e.app.findRecordById("fuel_cards", e.request.pathValue("id"));
+  const me = membershipOf(e.app, card.get("company"), e.auth.id);
+  if (!me) throw new ForbiddenError("Нет доступа");
+  if (!hasRole(me, ["owner", "manager"]) && card.get("holder") !== me.id) {
+    throw new ForbiddenError("ПИН видит только тот, за кем закреплена карта, и руководство");
+  }
+  if (!card.get("pin_enc")) throw new NotFoundError("ПИН не задан");
+  const pin = $security.decrypt(card.get("pin_enc"), $security.hs256("ordius-fuel-pin", $os.getenv("PB_ENCRYPTION_KEY")).slice(0, 32));
+  audit(e.app, "view", card, e.auth, { reason: "pin viewed" });
+  return e.json(200, { pin });
+}, $apis.requireAuth("users"));
+
+// ---------- график вахт: даты по порядку, у человека вахты не накладываются ----------
+const checkRotation = (e) => {
+  const { rejectServerFields } = require(`${__hooks}/lib/util.js`);
+  rejectServerFields(e, ["created_by"]);
+  const r = e.record;
+  if (r.isNew()) r.set("created_by", e.auth ? e.auth.id : "");
+  const df = r.getString("date_from").slice(0, 10);
+  const dt = r.getString("date_to").slice(0, 10);
+  if (df && dt && dt < df) throw new BadRequestError("Конец вахты раньше начала");
+  if (r.get("status") !== "cancelled" && df && dt) {
+    let clash = null;
+    try {
+      clash = e.app.findFirstRecordByFilter("rotations",
+        "member = {:m} && status != 'cancelled' && id != {:id} && date_from <= {:to} && date_to >= {:from}",
+        { m: r.get("member"), id: r.id || "", from: df + " 00:00:00.000Z", to: dt + " 23:59:59.999Z" });
+    } catch (_) { /* пересечений нет */ }
+    if (clash) throw new BadRequestError("У человека уже есть вахта на эти даты");
+  }
+  e.next();
+};
+onRecordCreateRequest(checkRotation, "rotations");
+onRecordUpdateRequest(checkRotation, "rotations");
+
+// ---------- сообщения: автор ставится сервером ----------
+onRecordCreateRequest((e) => {
+  const { rejectServerFields } = require(`${__hooks}/lib/util.js`);
+  rejectServerFields(e, ["author"]);
+  e.record.set("author", e.auth ? e.auth.id : "");
+  e.next();
+}, "messages");

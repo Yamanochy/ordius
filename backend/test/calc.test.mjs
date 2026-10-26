@@ -85,4 +85,69 @@ t("сводка: начислено, выплачено, к выплате", () 
   assert.deepEqual([s.shifts_confirmed, s.shifts_pending, s.accrued_kop, s.paid_kop, s.due_kop], [1, 1, 1200, 500, 700]);
 });
 
+// ---------- выручка по контракту ----------
+const items = [
+  { id: "sweep", name: "Подметание", unit: "lin_m", vehicle_kind: "road_sweeper" },
+  { id: "loader", name: "Час погрузчика", unit: "hour", vehicle_kind: "loader" },
+  { id: "loader7", name: "Час погрузчика №7", unit: "hour", vehicle: "v7" },
+  { id: "trip", name: "Рейс", unit: "trip" },
+  { id: "fee", name: "Абонентская плата", unit: "month" },
+];
+const prices = [
+  { item: "sweep", price_kop: 1500, vat: "22", valid_from: "2026-01-01" },
+  { item: "loader", price_kop: 250000, valid_from: "2026-01-01" },
+  { item: "loader", price_kop: 270000, valid_from: "2026-11-01" },
+  { item: "loader7", price_kop: 300000, valid_from: "2026-01-01" },
+  { item: "fee", price_kop: 3100000, valid_from: "2026-01-01" },
+];
+const kinds = { v1: "road_sweeper", v2: "loader", v7: "loader" };
+
+t("водителю за часы, заказчику за погонные метры", () => {
+  const r = calc.billShift({ date: "2026-10-15" }, [{ id: "a", vehicle: "v1", unit: "hour", quantity: 8, contract_item: "sweep", bill_qty: 2000 }], items, prices, kinds);
+  assert.equal(r.amount_kop, 2000 * 1500);
+  assert.equal(r.status, "ok");
+  assert.equal(r.lines[0].vat, "22");
+});
+
+t("позиция подбирается по технике: своя машина точнее вида", () => {
+  const r = calc.billShift({ date: "2026-10-15" }, [{ id: "a", vehicle: "v2", unit: "hour", quantity: 10 }, { id: "b", vehicle: "v7", unit: "hour", quantity: 2 }], items, prices, kinds);
+  assert.deepEqual(r.lines.map((l) => [l.item, l.amount_kop]), [["loader", 2500000], ["loader7", 600000]]);
+});
+
+t("цена заказчика берётся на дату смены", () => {
+  const r = calc.billShift({ date: "2026-11-02" }, [{ id: "a", vehicle: "v2", unit: "hour", quantity: 1 }], items, prices, kinds);
+  assert.equal(r.amount_kop, 270000);
+});
+
+t("чего не хватает — не ломает, а попадает в «не выставлено»", () => {
+  const r = calc.billShift({ date: "2026-10-15" }, [
+    { id: "a", vehicle: "v1", unit: "hour", quantity: 8, contract_item: "sweep" },   // нет метров
+    { id: "b", vehicle: "v9", unit: "tkm", tons: 10, km: 5 },                       // нет позиции
+    { id: "c", vehicle: "v2", unit: "trip", quantity: 3 },                          // рейс есть, цены нет
+    { id: "d", vehicle: "v2", unit: "hour", quantity: 1, contract_item: "чужая" },  // позиция не из контракта
+  ], items, prices, kinds);
+  assert.equal(r.status, "incomplete");
+  assert.equal(r.amount_kop, 0);
+  assert.deepEqual(r.missing.map((m) => m.entry), ["a", "b", "c", "d"]);
+  assert.match(r.missing[0].reason, /п\.м\./);
+  assert.match(r.missing[2].reason, /нет цены/);
+});
+
+t("две равные позиции — выбор за человеком", () => {
+  const two = [...items, { id: "trip2", name: "Рейс дальний", unit: "trip" }];
+  const r = calc.billShift({ date: "2026-10-15" }, [{ id: "a", vehicle: "v2", unit: "trip", quantity: 1 }], two, prices, kinds);
+  assert.match(r.missing[0].reason, /несколько позиций/);
+});
+
+t("абонентская позиция — по дням периода", () => {
+  assert.equal(calc.monthlyForPeriod(items[4], prices, "2026-10-01", "2026-10-31"), 3100000);
+  assert.equal(calc.monthlyForPeriod(items[4], prices, "2026-10-01", "2026-10-10"), 1000000);
+});
+
+t("новые единицы оплаты: км и тонны из замеров", () => {
+  assert.equal(calc.quantity({ unit: "km", km: 120 }), 120);
+  assert.equal(calc.quantity({ unit: "ton", tons: 18.5 }), 18.5);
+  assert.equal(calc.quantity({ unit: "lin_m", quantity: 1500 }), 1500);
+});
+
 console.log(`\n${n} проверок расчёта прошло`);

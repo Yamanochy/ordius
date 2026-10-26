@@ -416,6 +416,134 @@ check("чужая компания ведомость не получает", (a
 const csv = await api("GET", `/api/ordius/payroll?company=${companyA}&from=2026-10-01&to=2026-10-31&format=csv`, { token: ACC.token });
 check("выгрузка для бухгалтерии в CSV", csv.status === 200 && csv.text.includes("К выплате") && csv.text.includes("46100,00"), csv.text.slice(0, 300));
 
+// ---------- контракты заказчиков и выручка ----------
+const veh3 = await create("vehicles", A.token, { company: companyA, name: "МК-1000", plate: "Е777КХ154", kind: "road_sweeper", active: true });
+const vehicle3 = veh3.json.id;
+await R({ name: "Час на подметальной", unit: "hour", amount_kop: 50000, vehicle: vehicle3 });
+const ct = await create("contracts", A.token, { company: companyA, customer: cust.json.id, number: "0151300000126000123",
+  title: "Уборка улиц Первомайского района", status: "active", limit_kop: 100000000 });
+check("владелец заводит контракт заказчика", is2xx(ct), ct.json);
+const contract1 = ct.json.id;
+const CI = async (body) => {
+  const r = await create("contract_items", A.token, { company: companyA, contract: contract1, active: true, ...body });
+  if (!is2xx(r)) check("позиция " + body.name, false, r.json);
+  return r.json.id;
+};
+const itSweep = await CI({ name: "Механизированное подметание", unit: "lin_m", vehicle_kind: "road_sweeper" });
+const itLoader = await CI({ name: "Работа погрузчика", unit: "hour", vehicle_kind: "loader" });
+const itFee = await CI({ name: "Дежурство техники", unit: "month" });
+const CP = (item, price_kop, extra = {}) => create("contract_prices", A.token, { company: companyA, item, price_kop, valid_from: "2026-01-01", ...extra });
+check("цены позиций вносятся", is2xx(await CP(itSweep, 1500, { vat: "22" })) && is2xx(await CP(itLoader, 250000)) && is2xx(await CP(itFee, 3100000)));
+check("цену вносит только руководство", !is2xx(await create("contract_prices", ACC.token, { company: companyA, item: itSweep, price_kop: 1, valid_from: "2026-01-01" })));
+check("объект привязан к контракту", is2xx(await update("sites", site.json.id, A.token, { contract: contract1 })));
+
+check("водитель видит позиции контракта", (await list("contract_items", D1.token)).length === 3);
+check("водитель не видит цен заказчика", (await list("contract_prices", D1.token)).length === 0);
+check("водитель не видит контракты", (await list("contracts", D1.token)).length === 0);
+check("механик не видит цен", (await list("contract_prices", MECH.token)).length === 0);
+check("бухгалтер видит цены и контракт", (await list("contract_prices", ACC.token)).length === 3 && (await list("contracts", ACC.token)).length === 1);
+check("чужая компания не видит ни позиций, ни цен", (await list("contract_items", B.token)).length === 0 && (await list("contract_prices", B.token)).length === 0);
+check("в чужой компании контракт на нашего заказчика не завести",
+  !is2xx(await create("contracts", B.token, { company: companyB, customer: cust.json.id, title: "Чужой", status: "active" })));
+
+const sb1 = await create("shifts", D1.token, { company: companyA, member: d1Membership, date: "2026-12-01", site: site.json.id, status: "submitted" });
+check("контракт и заказчик в смену подставились по объекту", is2xx(sb1) && sb1.json.contract === contract1 && sb1.json.customer === cust.json.id, sb1.json);
+check("строка: водителю 8 ч, заказчику 2 000 п.м.", is2xx(await E(D1.token, { shift: sb1.json.id, vehicle: vehicle3, unit: "hour", quantity: 8,
+  contract_item: itSweep, bill_qty: 2000, waybill_no: "000123", odometer_start: 15230, odometer_end: 15302, engine_hours_start: 4210, engine_hours_end: 4218 })));
+check("строка погрузчика: позиция подберётся сама", is2xx(await E(D1.token, { shift: sb1.json.id, vehicle: vehicle2, unit: "hour", quantity: 10 })));
+const cb1 = await update("shifts", sb1.json.id, A.token, { status: "confirmed" });
+check("оплата людям: 8 × 500 + 10 × 600 = 10 000 ₽", is2xx(cb1) && cb1.json.amount_kop === 1000000, cb1.json);
+const bills1 = await list("shift_bills", ACC.token, `shift = "${sb1.json.id}"`);
+check("выручка: 2 000 п.м. × 15 + 10 ч × 2 500 = 55 000 ₽", bills1.length === 1 && bills1[0].amount_kop === 5500000 && bills1[0].status === "ok", bills1);
+check("водитель выручку не видит", (await list("shift_bills", D1.token)).length === 0);
+check("в смене водителя цен заказчика нет", !JSON.stringify((await view("shifts", sb1.json.id, D1.token)).json).includes("250000"));
+
+const sb2 = await create("shifts", D1.token, { company: companyA, member: d1Membership, date: "2026-12-02", site: site.json.id, status: "submitted" });
+await E(D1.token, { shift: sb2.json.id, vehicle: vehicle1, unit: "trip", quantity: 3 });
+const cb2 = await update("shifts", sb2.json.id, A.token, { status: "confirmed" });
+check("нет позиции в контракте — смена всё равно подтверждается", is2xx(cb2) && cb2.json.amount_kop === 1050000, cb2.json);
+const bills2 = await list("shift_bills", ACC.token, `shift = "${sb2.json.id}"`);
+check("…а выручка помечена «не выставлено» с причиной", bills2.length === 1 && bills2[0].status === "incomplete" && /нет позиции/.test(JSON.stringify(bills2[0].missing)), bills2);
+
+const reg = await api("GET", `/api/ordius/registry?company=${companyA}&contract=${contract1}&from=2026-12-01&to=2026-12-31`, { token: ACC.token });
+check("реестр: 30 000 + 25 000 + дежурство 31 000 = 86 000 ₽, НДС 22% с подметания",
+  is2xx(reg) && reg.json && reg.json.total_kop === 8600000 && reg.json.lines.length === 3 && reg.json.vat_kop === Math.round(3000000 * 22 / 122) && reg.json.missing.length === 1, reg.json);
+check("реестр показывает водителя, технику и объект", reg.json && reg.json.lines.some((l) => l.driver === "Дмитрий Водитель" && /МК-1000/.test(l.vehicle) && l.site === "Ул. Первомайская"), reg.json && reg.json.lines);
+const regCsv = await api("GET", `/api/ordius/registry?company=${companyA}&contract=${contract1}&from=2026-12-01&to=2026-12-31&format=csv`, { token: ACC.token });
+check("реестр в CSV для Excel: итог и «не выставлено»", regCsv.status === 200 && regCsv.text.includes("86000,00") && regCsv.text.includes("Не выставлено") && regCsv.text.includes("Механизированное подметание"), regCsv.text.slice(0, 400));
+check("водитель реестр не получает", (await api("GET", `/api/ordius/registry?company=${companyA}&contract=${contract1}&from=2026-12-01&to=2026-12-31`, { token: D1.token })).status === 403);
+
+const itTrip = await CI({ name: "Вывоз смёта, рейс", unit: "trip" });
+await CP(itTrip, 400000);
+const rc = await api("POST", "/api/ordius/bills/recalc", { token: A.token, body: { company: companyA, from: "2026-12-01", to: "2026-12-31" } });
+check("после внесения цены пересчёт закрывает пробел", is2xx(rc) && rc.json.shifts === 2 && rc.json.incomplete === 0, rc.json);
+check("бухгалтер пересчитывать не может", (await api("POST", "/api/ordius/bills/recalc", { token: ACC.token, body: { company: companyA, from: "2026-12-01", to: "2026-12-31" } })).status === 403);
+const reg2 = await api("GET", `/api/ordius/registry?company=${companyA}&contract=${contract1}&from=2026-12-01&to=2026-12-31`, { token: A.token });
+check("реестр после пересчёта: 98 000 ₽, пробелов нет", reg2.json && reg2.json.total_kop === 9800000 && reg2.json.missing.length === 0, reg2.json && reg2.json.total_kop);
+
+const rv = await api("GET", `/api/ordius/revenue?company=${companyA}&from=2026-12-01&to=2026-12-31&group=vehicle`, { token: ACC.token });
+const rvRow = (id) => rv.json && rv.json.rows.find((r) => r.key === id);
+check("по технике: подметальная 30 000 − 4 000, погрузчик 25 000 − 6 000, самосвал 12 000 − 10 500",
+  rvRow(vehicle3) && rvRow(vehicle3).bill_kop === 3000000 && rvRow(vehicle3).pay_kop === 400000 && rvRow(vehicle3).margin_kop === 2600000 &&
+  rvRow(vehicle2).bill_kop === 2500000 && rvRow(vehicle2).pay_kop === 600000 && rvRow(vehicle1).bill_kop === 1200000 && rvRow(vehicle1).pay_kop === 1050000, rv.json);
+const rvc = await api("GET", `/api/ordius/revenue?company=${companyA}&from=2026-12-01&to=2026-12-31&group=customer`, { token: A.token });
+check("по заказчику: выручка 67 000, люди 20 500, разница 46 500", rvc.json && rvc.json.total.bill_kop === 6700000 && rvc.json.total.pay_kop === 2050000 && rvc.json.total.margin_kop === 4650000, rvc.json);
+check("водитель деньги компании не видит", (await api("GET", `/api/ordius/revenue?company=${companyA}&from=2026-12-01&to=2026-12-31`, { token: D1.token })).status === 403);
+
+check("снятие подтверждения убирает выручку", is2xx(await update("shifts", sb2.json.id, A.token, { status: "submitted" })) &&
+  (await list("shift_bills", ACC.token, `shift = "${sb2.json.id}"`)).length === 0);
+const ct2 = await create("contracts", A.token, { company: companyA, customer: cust.json.id, title: "Другой контракт", status: "active" });
+const itOther = (await create("contract_items", A.token, { company: companyA, contract: ct2.json.id, name: "Чужая позиция", unit: "hour", active: true })).json.id;
+check("позицию из другого контракта в смену не поставить", (await E(D1.token, { shift: sb2.json.id, vehicle: vehicle2, unit: "hour", quantity: 1, contract_item: itOther })).status === 400);
+const cust2 = await create("customers", A.token, { company: companyA, name: "ДЭУ №3", active: true });
+check("контракт одного заказчика в смене другого — нельзя",
+  (await create("shifts", D1.token, { company: companyA, member: d1Membership, date: "2026-12-03", customer: cust2.json.id, contract: contract1, status: "draft" })).status === 400);
+
+// ---------- ЭПЛ и ЭТрН: заготовка ----------
+const etrn = await create("documents", MGR.token, { company: companyA, kind: "etrn", number: "ЭТрН-15", doc_date: "2026-12-01", external_id: "a1b2c3", external_status: "signed", shift: sb1.json.id });
+check("электронная накладная — без фото, с номером и ID из ГИС ЭПД", is2xx(etrn), etrn.json);
+
+// ---------- топливные карты ----------
+const fc = await create("fuel_cards", A.token, { company: companyA, number: "7005830012345678", provider: "Газпромнефть", vehicle: vehicle1, holder: d1Membership, active: true });
+check("руководство заводит топливную карту", is2xx(fc) && fc.json.pin_set === false, fc.json);
+const pinUrl = `/api/ordius/fuel-cards/${fc.json.id}/pin`;
+check("водитель ПИН не задаёт", (await api("POST", pinUrl, { token: D1.token, body: { pin: "1111" } })).status === 403);
+check("ПИН — только цифры", (await api("POST", pinUrl, { token: A.token, body: { pin: "12a4" } })).status === 400);
+check("владелец задаёт ПИН", is2xx(await api("POST", pinUrl, { token: A.token, body: { pin: "4321" } })));
+const fcView = await view("fuel_cards", fc.json.id, D1.token);
+check("в карточке карты ПИН не отдаётся", fcView.json.pin_set === true && fcView.json.pin_enc === undefined && !JSON.stringify(fcView.json).includes("4321"), fcView.json);
+const pinD1 = await api("GET", pinUrl, { token: D1.token });
+check("водитель, за которым карта, видит ПИН", is2xx(pinD1) && pinD1.json.pin === "4321", pinD1.json);
+check("механик ПИН не видит", (await api("GET", pinUrl, { token: MECH.token })).status === 403);
+check("чужая компания ПИН не видит", (await api("GET", pinUrl, { token: B.token })).status !== 200);
+const fcSu = await view("fuel_cards", fc.json.id, su);
+check("в базе ПИН зашифрован", fcSu.json.pin_enc && fcSu.json.pin_enc !== "4321" && !fcSu.json.pin_enc.includes("4321"), fcSu.json.pin_enc);
+check("отметку «ПИН задан» клиент не ставит", (await update("fuel_cards", fc.json.id, A.token, { pin_set: false })).status === 400);
+check("каждый просмотр ПИН — в журнале", (await list("audit_log", A.token, `collection_name = "fuel_cards" && action = "view"`)).length === 1);
+
+// ---------- график вахт ----------
+const rot = await create("rotations", MGR.token, { company: companyA, member: d1Membership, site: site.json.id, date_from: "2026-12-10", date_to: "2027-01-23", status: "planned" });
+check("руководитель ставит вахту 45 дней", is2xx(rot) && rot.json.created_by === MGR.id, rot.json);
+check("водитель видит график", (await list("rotations", D1.token)).length === 1);
+check("водитель график не правит", !is2xx(await create("rotations", D1.token, { company: companyA, member: d1Membership, date_from: "2027-03-01", date_to: "2027-04-14", status: "planned" })));
+check("вахты одного человека не накладываются",
+  (await create("rotations", MGR.token, { company: companyA, member: d1Membership, date_from: "2027-01-01", date_to: "2027-02-14", status: "planned" })).status === 400);
+check("конец вахты раньше начала — нельзя",
+  (await create("rotations", MGR.token, { company: companyA, member: d1Membership, date_from: "2027-05-10", date_to: "2027-05-01", status: "planned" })).status === 400);
+check("чужая компания график не видит", (await list("rotations", B.token)).length === 0);
+
+// ---------- сообщения ----------
+const m1 = await create("messages", D1.token, { company: companyA, site: site.json.id, text: "На Первомайской сегодня снег, выезжаем в 6:00" });
+check("сообщение в чат бригады, автор — сам человек", is2xx(m1) && m1.json.author === D1.id, m1.json);
+check("подделать автора нельзя", (await create("messages", D1.token, { company: companyA, text: "x", author: A.id })).status === 400);
+check("чат бригады видят в компании", (await list("messages", MECH.token)).some((m) => m.id === m1.json.id));
+const m2 = await create("messages", D1.token, { company: companyA, shift: sb1.json.id, text: "Путевой сфотографировал, гляньте" });
+check("обсуждение своей смены", is2xx(m2), m2.json);
+check("обсуждение смены видит офис", (await list("messages", ACC.token, `shift = "${sb1.json.id}"`)).length === 1);
+check("…но не другой водитель", (await list("messages", D2u.token, `shift = "${sb1.json.id}"`)).length === 0);
+check("в чужую смену не написать", !is2xx(await create("messages", D2u.token, { company: companyA, shift: sb1.json.id, text: "x" })));
+check("чужая компания сообщения не видит", (await list("messages", B.token)).length === 0);
+
 // ---------- роль владельца ----------
 check("руководитель не делает себя владельцем", (await update("memberships", MGR.membership, MGR.token, { roles: ["owner"] })).status === 403);
 check("руководитель не увольняет владельца", (await update("memberships", ownerMembership, MGR.token, { status: "dismissed" })).status === 403);

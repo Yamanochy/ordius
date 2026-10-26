@@ -1,5 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
-// Схема Ordius: компании, участники и роли, справочники, смены, ставки, выплаты, задачи, документы.
+// Схема Ordius: компании, участники и роли, справочники, контракты заказчиков, смены, ставки, выручка,
+// выплаты, задачи, документы, топливные карты, вахты, сообщения.
 //
 // Главный принцип: человек видит и меняет данные только тех компаний, где он активный участник,
 // и только в пределах своих ролей. Это проверяют правила доступа PocketBase на каждом запросе.
@@ -19,6 +20,8 @@ migrate((app) => {
   const MGMT = ["owner", "manager"];
   const OFFICE = ["owner", "manager", "dispatcher", "accountant"];
   const MONEY = ["owner", "manager", "accountant"];
+  // Единицы работы: в них считается и оплата людям, и цена заказчику. «month» — только у ставок и позиций контракта.
+  const UNITS = ["hour", "shift", "trip", "tkm", "km", "lin_m", "sq_m", "cu_m", "ton", "piece"];
 
   // ---------- поля ----------
   const created = () => ({ name: "created", type: "autodate", onCreate: true, onUpdate: false });
@@ -143,10 +146,53 @@ migrate((app) => {
     created(), updated(),
   ], ["CREATE INDEX idx_customers_company ON customers (company)"]);
 
+  // ---------- контракты заказчиков: позиции без цен видят все, цены — только владелец, руководитель, бухгалтер ----------
+  const contracts = make("contracts", [
+    rel("company", companies.id, { required: true }),
+    rel("customer", customers.id, { required: true }),
+    text("number", { max: 100 }),
+    date("signed_on"),
+    text("title", { required: true, max: 300 }),
+    date("valid_from"), date("valid_to"),
+    // цена контракта (потолок), если есть — чтобы видеть, сколько уже выполнено
+    int("limit_kop", { min: 0, max: 100000000000 }),
+    select("status", ["active", "closed"], { required: true }),
+    text("note", { max: 2000 }),
+    created(), updated(),
+  ], ["CREATE INDEX idx_contracts_company ON contracts (company, customer)"]);
+
+  const contractItems = make("contract_items", [
+    rel("company", companies.id, { required: true }),
+    rel("contract", contracts.id, { required: true, cascadeDelete: true }),
+    text("name", { required: true, max: 300 }),
+    select("unit", [...UNITS, "month"], { required: true }),
+    // к какой технике относится позиция: конкретная машина, вид техники или любая
+    rel("vehicle", vehicles.id),
+    select("vehicle_kind", ["dump_truck", "truck", "loader", "excavator", "grader", "tractor", "road_sweeper",
+      "vacuum_truck", "crane", "other"]),
+    num("planned_qty", { min: 0 }),
+    bool("active"),
+    text("note", { max: 1000 }),
+    created(), updated(),
+  ], ["CREATE INDEX idx_contract_items_contract ON contract_items (contract)"]);
+
+  const contractPrices = make("contract_prices", [
+    rel("company", companies.id, { required: true }),
+    rel("item", contractItems.id, { required: true, cascadeDelete: true }),
+    // цена за единицу как в контракте (с НДС, если он есть); ставка НДС — для акта и счёта
+    int("price_kop", { required: true, min: 0, max: 100000000 }),
+    select("vat", ["none", "0", "5", "7", "10", "20", "22"]),
+    date("valid_from", { required: true }),
+    date("valid_to"),
+    text("note", { max: 1000 }),
+    created(), updated(),
+  ], ["CREATE INDEX idx_contract_prices_item ON contract_prices (item, valid_from)"]);
+
   const sites = make("sites", [
     rel("company", companies.id, { required: true }),
     text("name", { required: true, max: 200 }),
     rel("customer", customers.id),
+    rel("contract", contracts.id),
     text("address", { max: 300 }),
     bool("active"),
     text("note", { max: 1000 }),
@@ -157,7 +203,7 @@ migrate((app) => {
   const rates = make("rates", [
     rel("company", companies.id, { required: true }),
     text("name", { max: 120 }),
-    select("unit", ["hour", "shift", "trip", "tkm", "month"], { required: true }),
+    select("unit", [...UNITS, "month"], { required: true }),
     int("amount_kop", { required: true, min: 0, max: 100000000 }),
     rel("member", memberships.id),
     rel("vehicle", vehicles.id),
@@ -185,9 +231,12 @@ migrate((app) => {
     date("date", { required: true }),
     rel("site", sites.id),
     rel("customer", customers.id),
+    rel("contract", contracts.id),
     select("status", ["draft", "submitted", "confirmed", "rejected"], { required: true }),
     bool("night"), bool("holiday"),
     text("note", { max: 2000 }),
+    // для электронного путевого листа (ЭПЛ): медосмотр водителя, выезд и возврат
+    date("med_check_at"), date("departure_at"), date("return_at"),
     rel("created_by", users.id),
     rel("confirmed_by", users.id),
     date("confirmed_at"),
@@ -204,14 +253,42 @@ migrate((app) => {
     rel("company", companies.id, { required: true }),
     rel("shift", shifts.id, { required: true, cascadeDelete: true }),
     rel("vehicle", vehicles.id),
-    select("unit", ["hour", "shift", "trip", "tkm"], { required: true }),
-    num("quantity", { min: 0, max: 100000 }),
+    // единица и количество — для оплаты человеку; тонны и километры — для т·км (и как замеры)
+    select("unit", UNITS, { required: true }),
+    num("quantity", { min: 0, max: 1000000 }),
     num("tons", { min: 0, max: 1000 }),
     num("km", { min: 0, max: 100000 }),
     bool("overtime"),
+    // позиция контракта заказчика и количество в её единицах (если они отличаются от единицы оплаты:
+    // водителю — за часы, заказчику — за погонные метры)
+    rel("contract_item", contractItems.id),
+    num("bill_qty", { min: 0, max: 10000000 }),
+    // для ЭПЛ: путевой лист, техосмотр, одометр, моточасы, топливо по этой машине
+    text("waybill_no", { max: 50 }),
+    date("tech_check_at"),
+    num("odometer_start", { min: 0 }), num("odometer_end", { min: 0 }),
+    num("engine_hours_start", { min: 0 }), num("engine_hours_end", { min: 0 }),
+    num("fuel_start", { min: 0 }), num("fuel_end", { min: 0 }), num("fuel_added", { min: 0 }),
     text("note", { max: 1000 }),
     created(), updated(),
   ], ["CREATE INDEX idx_shift_entries_shift ON shift_entries (shift)"]);
+
+  // ---------- выручка по подтверждённой смене: считает сервер, видят владелец, руководитель, бухгалтер ----------
+  const shiftBills = make("shift_bills", [
+    rel("company", companies.id, { required: true }),
+    rel("shift", shifts.id, { required: true, cascadeDelete: true }),
+    rel("customer", customers.id),
+    rel("contract", contracts.id),
+    date("date", { required: true }),
+    int("amount_kop"),
+    select("status", ["ok", "incomplete"], { required: true }),
+    json("lines"),
+    json("missing"),
+    created(), updated(),
+  ], [
+    "CREATE UNIQUE INDEX idx_shift_bills_shift ON shift_bills (shift)",
+    "CREATE INDEX idx_shift_bills_company_date ON shift_bills (company, date)",
+  ]);
 
   // ---------- удержания, премии, авансы, выплаты ----------
   const adjustments = make("adjustments", [
@@ -280,9 +357,9 @@ migrate((app) => {
   // ---------- документы: фото путевых, ТТН, актов, чеков ----------
   const documents = make("documents", [
     rel("company", companies.id, { required: true }),
-    select("kind", ["waybill", "ttn", "act", "receipt", "photo", "other"], { required: true }),
+    select("kind", ["waybill", "ttn", "act", "receipt", "photo", "epl", "etrn", "other"], { required: true }),
     {
-      name: "files", type: "file", required: true, maxSelect: 10, maxSize: 15 * 1024 * 1024,
+      name: "files", type: "file", required: false, maxSelect: 10, maxSize: 15 * 1024 * 1024,
       mimeTypes: ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"],
       thumbs: ["480x0"], protected: true,
     },
@@ -290,6 +367,11 @@ migrate((app) => {
     rel("task", tasks.id),
     rel("vehicle", vehicles.id),
     rel("uploaded_by", users.id),
+    text("number", { max: 100 }),
+    date("doc_date"),
+    // заготовка под ГИС ЭПД: идентификатор и состояние электронного документа (ЭПЛ, ЭТрН)
+    text("external_id", { max: 100 }),
+    select("external_status", ["draft", "sent", "signed", "rejected", "cancelled"]),
     text("note", { max: 1000 }),
     created(), updated(),
   ], [
@@ -297,11 +379,56 @@ migrate((app) => {
     "CREATE INDEX idx_documents_shift ON documents (shift)",
   ]);
 
+  // ---------- топливные карты: ПИН хранится зашифрованным и выдаётся отдельным запросом с записью в журнал ----------
+  const fuelCards = make("fuel_cards", [
+    rel("company", companies.id, { required: true }),
+    text("number", { required: true, max: 32 }),
+    text("provider", { max: 100 }),
+    rel("vehicle", vehicles.id),
+    rel("holder", memberships.id),
+    num("limit_liters", { min: 0 }),
+    date("valid_to"),
+    bool("active"),
+    text("pin_enc", { max: 500, hidden: true }),
+    bool("pin_set"),
+    text("note", { max: 1000 }),
+    created(), updated(),
+  ], ["CREATE INDEX idx_fuel_cards_company ON fuel_cards (company)"]);
+
+  // ---------- график вахт (45×45 и любые другие) ----------
+  const rotations = make("rotations", [
+    rel("company", companies.id, { required: true }),
+    rel("member", memberships.id, { required: true }),
+    rel("site", sites.id),
+    date("date_from", { required: true }),
+    date("date_to", { required: true }),
+    select("status", ["planned", "active", "done", "cancelled"], { required: true }),
+    text("note", { max: 1000 }),
+    rel("created_by", users.id),
+    created(), updated(),
+  ], [
+    "CREATE INDEX idx_rotations_company ON rotations (company, date_from)",
+    "CREATE INDEX idx_rotations_member ON rotations (member, date_from)",
+  ]);
+
+  // ---------- сообщения: общий чат компании, чат бригады объекта, обсуждение смены ----------
+  const messages = make("messages", [
+    rel("company", companies.id, { required: true }),
+    rel("site", sites.id),
+    rel("shift", shifts.id, { cascadeDelete: true }),
+    rel("author", users.id),
+    text("text", { required: true, max: 4000 }),
+    created(), updated(),
+  ], [
+    "CREATE INDEX idx_messages_company ON messages (company, created)",
+    "CREATE INDEX idx_messages_shift ON messages (shift)",
+  ]);
+
   // ---------- журнал изменений денег и доступа ----------
   const auditLog = make("audit_log", [
     rel("company", companies.id),
     rel("actor", users.id),
-    select("action", ["create", "update", "delete"], { required: true }),
+    select("action", ["create", "update", "delete", "view"], { required: true }),
     text("collection_name", { max: 50 }),
     text("record_id", { max: 30 }),
     json("data"),
@@ -352,6 +479,70 @@ migrate((app) => {
     });
   }
 
+  rules(contracts, {
+    listRule: role("company", OFFICE),
+    viewRule: role("company", OFFICE),
+    createRule: `${role("company", MGMT)} && customer.company = company`,
+    updateRule: `${role("company", MGMT)} && @request.body.company:changed = false`,
+    deleteRule: role("company", MGMT),
+  });
+
+  // позиции видят все: водитель выбирает, что делал («Подметание, п.м.»), но цен не видит
+  rules(contractItems, {
+    listRule: member("company"),
+    viewRule: member("company"),
+    createRule: `${role("company", MGMT)} && contract.company = company && (vehicle = "" || vehicle.company = company)`,
+    updateRule: `${role("company", MGMT)} && @request.body.company:changed = false && @request.body.contract:changed = false`,
+    deleteRule: role("company", MGMT),
+  });
+
+  rules(contractPrices, {
+    listRule: role("company", MONEY),
+    viewRule: role("company", MONEY),
+    createRule: `${role("company", MGMT)} && item.company = company`,
+    updateRule: `${role("company", MGMT)} && @request.body.company:changed = false && @request.body.item:changed = false`,
+    deleteRule: role("company", MGMT),
+  });
+
+  // выручку пишет только сервер при подтверждении смены
+  rules(shiftBills, {
+    listRule: role("company", MONEY),
+    viewRule: role("company", MONEY),
+    createRule: null,
+    updateRule: null,
+    deleteRule: null,
+  });
+
+  rules(fuelCards, {
+    listRule: member("company"),
+    viewRule: member("company"),
+    createRule: `${role("company", MGMT)} && (vehicle = "" || vehicle.company = company) && (holder = "" || holder.company = company)`,
+    updateRule: `${role("company", MGMT)} && @request.body.company:changed = false`,
+    deleteRule: role("company", MGMT),
+  });
+
+  // график видят все в компании; ведут владелец, руководитель, диспетчер
+  const PLAN = ["owner", "manager", "dispatcher"];
+  rules(rotations, {
+    listRule: member("company"),
+    viewRule: member("company"),
+    createRule: `${role("company", PLAN)} && member.company = company && (site = "" || site.company = company)`,
+    updateRule: `${role("company", PLAN)} && @request.body.company:changed = false`,
+    deleteRule: role("company", PLAN),
+  });
+
+  // обсуждение смены видят те, кто видит смену; остальные чаты — все в компании
+  const msgView = `(shift = "" && ${member("company")}) || (shift != "" && ((${role("company", OFFICE)}) || shift.member.user = @request.auth.id))`;
+  rules(messages, {
+    listRule: msgView,
+    viewRule: msgView,
+    createRule: `${member("company")} && (site = "" || site.company = company) && ` +
+      `(shift = "" || (shift.company = company && ((${role("company", OFFICE)}) || shift.member.user = @request.auth.id)))`,
+    updateRule: `author = @request.auth.id && @request.body.company:changed = false && ` +
+      `@request.body.site:changed = false && @request.body.shift:changed = false`,
+    deleteRule: `author = @request.auth.id || (${role("company", MGMT)})`,
+  });
+
   rules(rates, {
     listRule: `(${role("company", MONEY)}) || ${isMe("member")}`,
     viewRule: `(${role("company", MONEY)}) || ${isMe("member")}`,
@@ -378,6 +569,7 @@ migrate((app) => {
     viewRule: shiftView,
     createRule:
       `member.company = company && (site = "" || site.company = company) && (customer = "" || customer.company = company) && ` +
+      `(contract = "" || contract.company = company) && ` +
       `(@request.body.status = "draft" || @request.body.status = "submitted") && (` +
       `(${member("company")} && ${isMe("member")}) || (${role("company", ["owner", "manager", "dispatcher"])}))`,
     updateRule:
@@ -394,7 +586,8 @@ migrate((app) => {
   rules(shiftEntries, {
     listRule: entryView,
     viewRule: entryView,
-    createRule: `shift.company = company && (vehicle = "" || vehicle.company = company) && ${entryWrite}`,
+    createRule: `shift.company = company && (vehicle = "" || vehicle.company = company) && ` +
+      `(contract_item = "" || contract_item.company = company) && ${entryWrite}`,
     updateRule: `@request.body.company:changed = false && @request.body.shift:changed = false && ${entryWrite}`,
     deleteRule: entryWrite,
   });
@@ -471,8 +664,9 @@ migrate((app) => {
     deleteRule: null,
   });
 }, (app) => {
-  for (const name of ["audit_log", "documents", "posts", "task_events", "tasks", "payouts", "adjustments",
-    "shift_entries", "shifts", "rate_factors", "rates", "sites", "customers", "vehicles", "memberships", "companies",
+  for (const name of ["audit_log", "messages", "rotations", "fuel_cards", "documents", "posts", "task_events", "tasks",
+    "payouts", "adjustments", "shift_bills", "shift_entries", "shifts", "rate_factors", "rates", "sites",
+    "contract_prices", "contract_items", "contracts", "customers", "vehicles", "memberships", "companies",
     "phone_checks"]) {
     app.delete(app.findCollectionByNameOrId(name));
   }
