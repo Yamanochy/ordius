@@ -1,0 +1,63 @@
+# Приложение: сборка из исходников совпадает с app/dist в репозитории (её раскладывает ordius-deploy),
+# и сквозная проверка в браузере на настоящем PocketBase: регистрация звонком, смена с фото,
+# смена без связи, подтверждение, ведомость, заправка.
+name: app-tests
+
+on:
+  push:
+    paths: [app/**, backend/**, .github/workflows/app-tests.yml]
+  pull_request:
+    paths: [app/**, backend/**, .github/workflows/app-tests.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    # Ubuntu 24.04 закреплена: ubuntu-latest с октября 2026 переходит на 26.04, а Playwright 1.56 ставит
+    # системные библиотеки браузера только для известных ему версий Ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PB_VERSION: "0.40.5"
+      PB_SHA256: "1dbea1b01eb3dfe64953513859d01e759c96650c4e3264fa4eecd54b769382e4"
+      PLAYWRIGHT_VERSION: "1.56.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: PocketBase (с проверкой контрольной суммы)
+        run: |
+          set -euo pipefail
+          zip="pocketbase_${PB_VERSION}_linux_amd64.zip"
+          curl -fsSL --retry 3 -O "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/$zip"
+          echo "${PB_SHA256}  $zip" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/pb" && unzip -q "$zip" -d "$RUNNER_TEMP/pb"
+          echo "PB_BIN=$RUNNER_TEMP/pb/pocketbase" >> "$GITHUB_ENV"
+      - name: Сборка приложения
+        working-directory: app
+        run: npm ci && npm run build
+      - name: app/dist в репозитории собран из этих исходников
+        run: |
+          if ! git diff --stat --exit-code -- app/dist; then
+            echo "Пересоберите приложение (cd app && npm run build) и закоммитьте app/dist"
+            exit 1
+          fi
+      - name: Браузер для проверки
+        working-directory: app
+        run: |
+          npm install --no-save "playwright@${PLAYWRIGHT_VERSION}"
+          npx playwright install --with-deps chromium
+      - name: Сквозная проверка
+        run: node app/test/e2e.mjs
+      - name: Скриншоты (при сбое)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-shots
+          path: app/test/shots
+          retention-days: 7

@@ -53,7 +53,8 @@ ssh -t root@201.24.62.222 "curl -fsSL https://raw.githubusercontent.com/Yamanoch
 | Пароль администратора PocketBase | менеджер паролей | Сбросить на сервере командой ниже |
 | Ключи хранилища копий | панель Beget (Облако → Ordius backup → Реквизиты доступа); на сервере `/etc/ordius/backup.env` | Посмотреть в панели Beget |
 | Ключ шифрования настроек PocketBase | `/etc/ordius/pocketbase.env`, входит в копии | Восстанавливается вместе с копией |
-| SSH-ключ | только на твоём компьютере, `~/.ssh/id_ed25519` | Добавить новый ключ через панель Beget |
+| Ключ SMS.ru (звонки для подтверждения номера) | личный кабинет SMS.ru; на сервере `SMSRU_API_ID` в `/etc/ordius/pocketbase.env` | Выпустить новый в кабинете SMS.ru и записать командой ниже |
+| SSH-ключ | только на твоём компьютере, `~/.ssh/id_ed25519` | Добавить новый ключ через панель Timeweb Cloud |
 
 Сброс пароля администратора:
 
@@ -63,6 +64,16 @@ runuser -u pocketbase -- env $(cat /etc/ordius/pocketbase.env) \
   --dir=/var/lib/ordius/pb_data --migrationsDir=/opt/ordius/pb_migrations \
   --hooksDir=/opt/ordius/pb_hooks --encryptionEnv=PB_ENCRYPTION_KEY
 ```
+
+Ключ SMS.ru — записать или заменить (ввод скрыт, ключ не попадает в историю команд):
+
+```bash
+read -rsp "Ключ SMS.ru (api_id): " K && echo && sed -i '/^SMSRU_API_ID=/d' /etc/ordius/pocketbase.env \
+  && printf 'SMSRU_API_ID=%s\n' "$K" >> /etc/ordius/pocketbase.env && unset K \
+  && systemctl restart ordius-pocketbase && echo "Записано, сервис перезапущен"
+```
+
+Без ключа регистрация отвечает «Подтверждение номера ещё не настроено» — остальное работает.
 
 ## Каждый день
 
