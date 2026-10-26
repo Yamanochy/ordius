@@ -49,7 +49,7 @@ function pickFactor(factors, kind, date) {
 
 const UNIT_LABEL = {
   hour: "час", shift: "смена", trip: "рейс", tkm: "т·км", km: "км", lin_m: "п.м.", sq_m: "м²", cu_m: "м³",
-  ton: "т", piece: "шт", month: "месяц",
+  ton: "т", piece: "шт", month: "месяц", per_diem: "сутки вахты",
 };
 
 // Количество для оплаты по строке смены (в единице строки).
@@ -200,8 +200,74 @@ function salaryForPeriod(monthRates, from, to) {
   return Math.round(total);
 }
 
-// Сводка по одному человеку за период.
-function payrollSummary({ shifts, monthRates, adjustments, payouts, from, to }) {
+// ---------- вахта: суточные за каждый день вахты ----------
+// Считаются дни вахт со статусом «идёт» (до сегодняшнего дня включительно) и «закончена» внутри периода.
+// Ставка — unit "per_diem", самая точная по человеку и объекту. Часть до freeKop в день — без НДФЛ.
+function addDays(iso, n) {
+  const d = new Date(day(iso) + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function perDiemForPeriod(rotations, rates, from, to, today, freeKop) {
+  const seen = {};
+  let days = 0, amount = 0, free = 0, missing = 0;
+  for (const r of rotations) {
+    if (r.status !== "active" && r.status !== "done") continue;
+    let start = day(r.date_from) > day(from) ? day(r.date_from) : day(from);
+    let end = day(r.date_to) < day(to) ? day(r.date_to) : day(to);
+    if (r.status === "active" && today && day(today) < end) end = day(today);
+    for (let d = start; d <= end; d = addDays(d, 1)) {
+      if (seen[d]) continue;
+      seen[d] = true;
+      const rate = pickRate(rates, "per_diem", d, { member: r.member || "", site: r.site || "", vehicle: "", customer: "" });
+      if (!rate) { missing++; continue; }
+      days++;
+      amount += rate.amount_kop;
+      free += Math.min(rate.amount_kop, freeKop);
+    }
+  }
+  return { days, amount_kop: amount, free_kop: free, taxable_kop: amount - free, missing_days: missing };
+}
+
+// ---------- НДФЛ (резиденты, прогрессивная шкала с 2025 г., ст. 224 НК РФ) ----------
+// Налог считается нарастающим итогом с начала года и округляется до полных рублей (п. 6 ст. 52 НК РФ).
+const NDFL_SCALE = [[240000000, 13], [500000000, 15], [2000000000, 18], [5000000000, 20], [Infinity, 22]];
+
+function ndflCumulative(baseKop) {
+  let tax = 0;
+  let prev = 0;
+  for (const [limit, pct] of NDFL_SCALE) {
+    if (baseKop <= prev) break;
+    tax += (Math.min(baseKop, limit) - prev) * pct / 100;
+    prev = limit;
+  }
+  return Math.round(tax / 100) * 100;
+}
+
+// Сколько нужно начислить с начала года, чтобы на руки вышло netKop.
+function grossCumulative(netKop) {
+  if (netKop <= 0) return 0;
+  let lo = netKop;
+  let hi = Math.ceil(netKop / 0.77) + 200;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (mid - ndflCumulative(mid) >= netKop) hi = mid; else lo = mid + 1;
+  }
+  return lo;
+}
+
+// НДФЛ за период. basis "gross" — суммы до налога; "net" — суммы «на руки», налог сверху.
+// ytdBase — облагаемое с начала года до начала периода, в той же базе.
+function ndflPeriod(basis, ytdBase, base) {
+  if (!(base > 0)) return 0;
+  const ytd = Math.max(0, ytdBase || 0);
+  if (basis === "gross") return ndflCumulative(ytd + base) - ndflCumulative(ytd);
+  return (grossCumulative(ytd + base) - grossCumulative(ytd)) - base;
+}
+
+// Составляющие заработка человека за период (без налога и выплат).
+function payComponents({ shifts, monthRates, adjustments, perDiem, from, to }) {
   let earned = 0;
   let confirmed = 0;
   let pending = 0;
@@ -212,16 +278,98 @@ function payrollSummary({ shifts, monthRates, adjustments, payouts, from, to }) 
   const salary = salaryForPeriod(monthRates, from, to);
   let bonuses = 0;
   let deductions = 0;
+  let travel = 0;
   for (const a of adjustments) {
-    if (a.amount_kop >= 0) bonuses += a.amount_kop; else deductions += -a.amount_kop;
+    if (a.kind === "travel") travel += a.amount_kop;
+    else if (a.amount_kop >= 0) bonuses += a.amount_kop;
+    else deductions += -a.amount_kop;
   }
+  const pd = perDiem || { days: 0, amount_kop: 0, free_kop: 0, taxable_kop: 0, missing_days: 0 };
+  return {
+    shifts_confirmed: confirmed, shifts_pending: pending, earned_kop: earned, salary_kop: salary,
+    bonuses_kop: bonuses, deductions_kop: deductions, travel_kop: travel,
+    per_diem_days: pd.days, per_diem_kop: pd.amount_kop, per_diem_missing_days: pd.missing_days || 0,
+    taxable_kop: earned + salary + bonuses + pd.taxable_kop,
+    tax_free_kop: travel + pd.free_kop,
+  };
+}
+
+// Сводка по одному человеку за период. ndfl_kop считает вызывающий (ndflPeriod) — ему нужны суммы с начала года.
+//   gross_kop   — начислено до НДФЛ (с суточными и дорогой);
+//   accrued_kop — на руки после НДФЛ и удержаний; due_kop — осталось выплатить.
+function payrollSummary({ shifts, monthRates, adjustments, payouts, from, to, perDiem, ndfl_kop, basis }) {
+  const c = payComponents({ shifts, monthRates, adjustments, perDiem, from, to });
+  const ndfl = ndfl_kop || 0;
+  const grossTaxable = basis === "gross" ? c.taxable_kop : c.taxable_kop + ndfl;
+  const netTaxable = grossTaxable - ndfl;
   let paid = 0;
   for (const p of payouts) if (p.status === "paid") paid += p.amount_kop;
-  const accrued = earned + salary + bonuses - deductions;
-  return {
-    shifts_confirmed: confirmed, shifts_pending: pending,
-    earned_kop: earned, salary_kop: salary, bonuses_kop: bonuses, deductions_kop: deductions,
+  const accrued = netTaxable + c.tax_free_kop - c.deductions_kop;
+  return Object.assign(c, {
+    ndfl_kop: ndfl, gross_kop: grossTaxable + c.tax_free_kop,
     accrued_kop: accrued, paid_kop: paid, due_kop: accrued - paid,
+  });
+}
+
+// ---------- ТО: сколько осталось по пробегу, моточасам и дням ----------
+// «Скоро» — когда осталось 10 % интервала и меньше; «просрочено» — когда интервал вышел.
+function daysBetween(a, b) {
+  return Math.round((Date.parse(day(b) + "T00:00:00Z") - Date.parse(day(a) + "T00:00:00Z")) / 86400000);
+}
+
+function maintenanceStatus(plan, vehicle, today) {
+  const parts = [];
+  const add = (by, interval, last, now, unit) => {
+    if (!(interval > 0)) return;
+    const next = (last || 0) + interval;
+    parts.push({ by, unit, next, left: Math.round((next - (now || 0)) * 10) / 10, warn: Math.ceil(interval * 0.1) });
+  };
+  add("km", plan.interval_km, plan.last_km, vehicle.odometer_now, "км");
+  add("hours", plan.interval_hours, plan.last_hours, vehicle.engine_hours_now, "моточ.");
+  if (plan.interval_days > 0 && day(plan.last_date)) {
+    const nextDate = addDays(plan.last_date, plan.interval_days);
+    parts.push({ by: "days", unit: "дн.", next: nextDate, left: daysBetween(today, nextDate),
+      warn: Math.max(1, Math.ceil(plan.interval_days * 0.1)) });
+  }
+  let status = parts.length ? "ok" : "unknown";
+  for (const p of parts) {
+    if (p.left <= 0) status = "overdue";
+    else if (p.left <= p.warn && status !== "overdue") status = "soon";
+  }
+  return { status, parts };
+}
+
+// ---------- ГСМ: расход по путевым против нормы, заправки против путевых ----------
+// entries — строки смен по машине: показания одометра, моточасов и топлива; logs — заправки.
+function fuelSummary(vehicle, entries, logs) {
+  const r1 = (x) => Math.round(x * 10) / 10;
+  let km = 0, hours = 0, used = 0, norm = 0, addedWaybills = 0, withFuel = 0;
+  for (const e of entries) {
+    const dk = e.odometer_end > 0 && e.odometer_start > 0 ? Math.max(0, e.odometer_end - e.odometer_start) : 0;
+    const dh = e.engine_hours_end > 0 && e.engine_hours_start > 0 ? Math.max(0, e.engine_hours_end - e.engine_hours_start) : 0;
+    km += dk;
+    hours += dh;
+    addedWaybills += e.fuel_added || 0;
+    if (e.fuel_start > 0) {
+      const u = e.fuel_start + (e.fuel_added || 0) - (e.fuel_end || 0);
+      if (u >= 0) {
+        withFuel++;
+        used += u;
+        norm += dk * (vehicle.fuel_norm_100km || 0) / 100 + dh * (vehicle.fuel_norm_hour || 0);
+      }
+    }
+  }
+  let refueled = 0, spent = 0;
+  for (const l of logs) { refueled += l.liters || 0; spent += l.amount_kop || 0; }
+  const hasNorm = norm > 0 && used > 0;
+  return {
+    km: r1(km), hours: r1(hours), entries: entries.length, entries_with_fuel: withFuel,
+    used_l: r1(used), norm_l: hasNorm ? r1(norm) : null,
+    overrun_l: hasNorm ? r1(used - norm) : null, overrun_pct: hasNorm ? r1((used - norm) / norm * 100) : null,
+    per_100km: km > 0 && used > 0 && !hours ? r1(used / km * 100) : null,
+    refueled_l: r1(refueled), spent_kop: spent, added_waybills_l: r1(addedWaybills),
+    // по чекам и картам залито больше, чем записано в путевых — повод проверить
+    not_in_waybills_l: r1(refueled - addedWaybills),
   };
 }
 
@@ -233,6 +381,7 @@ function monthlyForPeriod(item, prices, from, to) {
 }
 
 module.exports = {
-  UNIT_LABEL, day, activeOn, pickRate, pickFactor, quantity, calcShift, salaryForPeriod, payrollSummary,
-  billQuantity, pickItem, pickPrice, billShift, monthlyForPeriod,
+  UNIT_LABEL, day, addDays, activeOn, pickRate, pickFactor, quantity, calcShift, salaryForPeriod, payrollSummary,
+  payComponents, perDiemForPeriod, ndflCumulative, grossCumulative, ndflPeriod,
+  billQuantity, pickItem, pickPrice, billShift, monthlyForPeriod, maintenanceStatus, fuelSummary,
 };

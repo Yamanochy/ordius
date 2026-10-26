@@ -679,6 +679,18 @@ const checkEntry = (e) => {
     }
   }
   e.next();
+  // показания из путевого — текущие показания машины; подошёл срок ТО — задача механику
+  const vehicleId = r.get("vehicle");
+  if (vehicleId) {
+    const fleet = require(`${__hooks}/lib/fleet.js`);
+    const calc = require(`${__hooks}/lib/calc.js`);
+    try {
+      if (fleet.bumpReadings(e.app, vehicleId, r.get("odometer_end") || r.get("odometer_start"),
+        r.get("engine_hours_end") || r.get("engine_hours_start"))) {
+        fleet.syncMaintenanceTasks(e.app, calc, "vehicle = {:v}", { v: vehicleId });
+      }
+    } catch (err) { e.app.logger().error("readings failed", "vehicle", vehicleId, "error", String(err)); }
+  }
 };
 onRecordCreateRequest(checkEntry, "shift_entries");
 onRecordUpdateRequest(checkEntry, "shift_entries");
@@ -716,7 +728,9 @@ for (const c of ["adjustments", "payouts"]) {
   onRecordUpdateRequest(moneyUpdate, c);
   onRecordDeleteRequest(moneyDelete, c);
 }
-for (const c of ["rates", "rate_factors", "contracts", "contract_items", "contract_prices", "fuel_cards"]) {
+// rotations — от графика вахт зависят суточные, поэтому изменения тоже в журнал
+for (const c of ["rates", "rate_factors", "contracts", "contract_items", "contract_prices", "fuel_cards", "maintenance_plans",
+  "rotations"]) {
   onRecordCreateRequest((e) => { const { audit } = require(`${__hooks}/lib/util.js`); e.next(); audit(e.app, "create", e.record, e.auth); }, c);
   onRecordUpdateRequest((e) => { const { audit } = require(`${__hooks}/lib/util.js`); e.next(); audit(e.app, "update", e.record, e.auth); }, c);
   onRecordDeleteRequest((e) => { const { audit } = require(`${__hooks}/lib/util.js`); e.next(); audit(e.app, "delete", e.record, e.auth); }, c);
@@ -732,7 +746,7 @@ onRecordCreateRequest((e) => {
 
 onRecordCreateRequest((e) => {
   const { rejectServerFields } = require(`${__hooks}/lib/util.js`);
-  rejectServerFields(e, ["created_by", "closed_at"]);
+  rejectServerFields(e, ["created_by", "closed_at", "maintenance_plan"]);
   e.record.set("created_by", e.auth ? e.auth.id : "");
   if (!e.record.get("status")) e.record.set("status", "new");
   if (!e.record.get("priority")) e.record.set("priority", "normal");
@@ -741,7 +755,7 @@ onRecordCreateRequest((e) => {
 
 onRecordUpdateRequest((e) => {
   const { rejectServerFields, nowIso } = require(`${__hooks}/lib/util.js`);
-  rejectServerFields(e, ["created_by", "closed_at"]);
+  rejectServerFields(e, ["created_by", "closed_at", "maintenance_plan"]);
   const before = e.record.original();
   const fromStatus = before.get("status");
   const toStatus = e.record.get("status");
@@ -782,6 +796,8 @@ onRecordCreateRequest((e) => {
 // ---------- расчётная ведомость ----------
 // GET /api/ordius/payroll?company=…&from=ГГГГ-ММ-ДД&to=ГГГГ-ММ-ДД[&member=…][&format=csv]
 // Владелец, руководитель и бухгалтер видят всех; остальные — только себя.
+// В строке: смены, оклад, премии, суточные за дни вахты, дорога, удержания, НДФЛ, начислено, на руки, к выплате.
+// НДФЛ — нарастающим итогом с начала года; ставки компании вносятся «на руки» или до НДФЛ (companies.rates_basis).
 routerAdd("GET", "/api/ordius/payroll", (e) => {
   const { membershipOf, hasRole } = require(`${__hooks}/lib/util.js`);
   const calc = require(`${__hooks}/lib/calc.js`);
@@ -796,6 +812,10 @@ routerAdd("GET", "/api/ordius/payroll", (e) => {
   if (days > 370) throw new BadRequestError("Период не длиннее года");
   const me = membershipOf(e.app, companyId, e.auth.id);
   if (!me) throw new ForbiddenError("Нет доступа к компании");
+  const company = e.app.findRecordById("companies", companyId);
+  const basis = company.get("rates_basis") === "gross" ? "gross" : "net";
+  const freeKop = company.get("per_diem_free_kop") || 70000;
+  const today = new Date().toISOString().slice(0, 10);
   const seeAll = hasRole(me, ["owner", "manager", "accountant"]);
   let members;
   if (seeAll) {
@@ -805,37 +825,68 @@ routerAdd("GET", "/api/ordius/payroll", (e) => {
   } else {
     members = [me];
   }
-  const range = { c: companyId, from: from + " 00:00:00.000Z", to: to + " 23:59:59.999Z" };
-  const rows = members.map((m) => {
-    const p = Object.assign({ m: m.id }, range);
+  const perDiemRates = e.app.findRecordsByFilter("rates", "company = {:c} && unit = 'per_diem'", "", 0, 0, { c: companyId })
+    .map((r) => ({ id: r.id, unit: "per_diem", amount_kop: r.get("amount_kop"), member: r.get("member"), vehicle: r.get("vehicle"),
+      site: r.get("site"), customer: r.get("customer"), valid_from: r.getString("valid_from"), valid_to: r.getString("valid_to") }));
+
+  // Всё, из чего складывается заработок человека за [f; t].
+  const inputs = (m, f, t) => {
+    const p = { m: m.id, c: companyId, from: f + " 00:00:00.000Z", to: t + " 23:59:59.999Z" };
     const shifts = e.app.findRecordsByFilter("shifts", "member = {:m} && date >= {:from} && date <= {:to}", "date", 0, 0, p)
       .map((s) => ({ status: s.get("status"), amount_kop: s.get("amount_kop") }));
     const monthRates = e.app.findRecordsByFilter("rates", "company = {:c} && unit = 'month' && member = {:m}", "", 0, 0, p)
       .map((r) => ({ unit: "month", amount_kop: r.get("amount_kop"), valid_from: r.getString("valid_from"), valid_to: r.getString("valid_to") }));
     const adjustments = e.app.findRecordsByFilter("adjustments", "member = {:m} && date >= {:from} && date <= {:to}", "", 0, 0, p)
-      .map((a) => ({ amount_kop: a.get("amount_kop") }));
+      .map((a) => ({ kind: a.get("kind"), amount_kop: a.get("amount_kop") }));
+    const rotations = e.app.findRecordsByFilter("rotations",
+      "member = {:m} && date_from <= {:to} && date_to >= {:from} && (status = 'active' || status = 'done')", "date_from", 0, 0, p)
+      .map((r) => ({ member: m.id, site: r.get("site"), status: r.get("status"),
+        date_from: r.getString("date_from"), date_to: r.getString("date_to") }));
+    const perDiem = calc.perDiemForPeriod(rotations, perDiemRates, f, t, today, freeKop);
+    return { shifts, monthRates, adjustments, perDiem, from: f, to: t };
+  };
+  const yearSegments = [];
+  for (let y = Number(from.slice(0, 4)); y <= Number(to.slice(0, 4)); y++) {
+    yearSegments.push({ from: y === Number(from.slice(0, 4)) ? from : `${y}-01-01`, to: y === Number(to.slice(0, 4)) ? to : `${y}-12-31` });
+  }
+
+  const rows = members.map((m) => {
+    const all = inputs(m, from, to);
+    let ndfl = 0;
+    if (!m.get("no_ndfl")) {
+      for (const seg of yearSegments) {
+        const base = calc.payComponents(yearSegments.length === 1 ? all : inputs(m, seg.from, seg.to)).taxable_kop;
+        const yearStart = seg.from.slice(0, 4) + "-01-01";
+        const ytd = seg.from > yearStart ? calc.payComponents(inputs(m, yearStart, calc.addDays(seg.from, -1))).taxable_kop : 0;
+        ndfl += calc.ndflPeriod(basis, ytd, base);
+      }
+    }
+    const p = { m: m.id, from: from + " 00:00:00.000Z", to: to + " 23:59:59.999Z" };
     const payouts = e.app.findRecordsByFilter("payouts",
       "member = {:m} && ((period_from != '' && period_from <= {:to} && period_to >= {:from}) || (period_from = '' && paid_on >= {:from} && paid_on <= {:to}))",
       "", 0, 0, p).map((x) => ({ status: x.get("status"), amount_kop: x.get("amount_kop") }));
     return Object.assign({
       member: m.id, display_name: m.get("display_name"), personnel_no: m.get("personnel_no"), status: m.get("status"),
-    }, calc.payrollSummary({ shifts, monthRates, adjustments, payouts, from, to }));
+      no_ndfl: !!m.get("no_ndfl"),
+    }, calc.payrollSummary(Object.assign({}, all, { payouts, ndfl_kop: ndfl, basis })));
   });
 
   if (q.format === "csv") {
     const rub = (k) => (k / 100).toFixed(2).replace(".", ",");
     const esc = (s) => '"' + String(s || "").replace(/"/g, '""') + '"';
     const head = ["Табельный №", "ФИО", "Смен подтверждено", "Смен не подтверждено", "По сменам, ₽", "Оклад, ₽",
-      "Премии, ₽", "Удержания, ₽", "Начислено, ₽", "Выплачено, ₽", "К выплате, ₽"];
+      "Премии, ₽", "Дней вахты", "Суточные, ₽", "Дорога, ₽", "Начислено до НДФЛ, ₽", "НДФЛ, ₽", "Удержания, ₽",
+      "На руки, ₽", "Выплачено, ₽", "К выплате, ₽"];
     const lines = [head.map(esc).join(";")].concat(rows.map((r) => [
       esc(r.personnel_no), esc(r.display_name), r.shifts_confirmed, r.shifts_pending, rub(r.earned_kop), rub(r.salary_kop),
-      rub(r.bonuses_kop), rub(r.deductions_kop), rub(r.accrued_kop), rub(r.paid_kop), rub(r.due_kop),
+      rub(r.bonuses_kop), r.per_diem_days, rub(r.per_diem_kop), rub(r.travel_kop), rub(r.gross_kop), rub(r.ndfl_kop),
+      rub(r.deductions_kop), rub(r.accrued_kop), rub(r.paid_kop), rub(r.due_kop),
     ].join(";")));
     e.response.header().set("Content-Type", "text/csv; charset=utf-8");
     e.response.header().set("Content-Disposition", `attachment; filename="ordius-${from}_${to}.csv"`);
-    return e.string(200, "﻿" + lines.join("\r\n") + "\r\n");
+    return e.string(200, "\uFEFF" + lines.join("\r\n") + "\r\n");
   }
-  return e.json(200, { company: companyId, from, to, rows });
+  return e.json(200, { company: companyId, from, to, basis, rows });
 }, $apis.requireAuth("users"));
 
 // ---------- выручка: пересчёт, реестр для заказчика, отчёт по деньгам ----------
@@ -1115,3 +1166,128 @@ onRecordCreateRequest((e) => {
   e.record.set("author", e.auth ? e.auth.id : "");
   e.next();
 }, "messages");
+
+// ---------- заправки и журнал ТО: автор — сервер; показания — в карточку машины; ТО — задачи механику ----------
+const fleetCreate = (e) => {
+  const { rejectServerFields, audit } = require(`${__hooks}/lib/util.js`);
+  const fleet = require(`${__hooks}/lib/fleet.js`);
+  const calc = require(`${__hooks}/lib/calc.js`);
+  rejectServerFields(e, ["created_by"]);
+  const isNew = e.record.isNew();
+  if (isNew) e.record.set("created_by", e.auth ? e.auth.id : "");
+  e.next();
+  const r = e.record;
+  const vehicleId = r.get("vehicle");
+  try {
+    fleet.bumpReadings(e.app, vehicleId, r.get("odometer"), r.get("engine_hours"));
+    if (r.collection().name === "maintenance_logs") fleet.applyLog(e.app, r, e.auth ? e.auth.id : "");
+    fleet.syncMaintenanceTasks(e.app, calc, "vehicle = {:v}", { v: vehicleId });
+  } catch (err) { e.app.logger().error("fleet update failed", "vehicle", vehicleId, "error", String(err)); }
+  audit(e.app, isNew ? "create" : "update", r, e.auth);
+};
+for (const c of ["fuel_logs", "maintenance_logs"]) {
+  onRecordCreateRequest(fleetCreate, c);
+  onRecordUpdateRequest(fleetCreate, c);
+  onRecordDeleteRequest((e) => { const { audit } = require(`${__hooks}/lib/util.js`); e.next(); audit(e.app, "delete", e.record, e.auth); }, c);
+}
+
+// ТО по сроку (дням) наступает и без новых показаний — проверка раз в час.
+cronAdd("ordius_maintenance", "41 * * * *", () => {
+  const fleet = require(`${__hooks}/lib/fleet.js`);
+  const calc = require(`${__hooks}/lib/calc.js`);
+  try { fleet.syncMaintenanceTasks($app, calc, "", {}); } catch (err) { $app.logger().error("maintenance sync failed", "error", String(err)); }
+});
+
+// Состояние ТО по всем машинам: что просрочено, что скоро, сколько осталось.
+// GET /api/ordius/maintenance?company=… — офис и механик.
+routerAdd("GET", "/api/ordius/maintenance", (e) => {
+  const { membershipOf, hasRole } = require(`${__hooks}/lib/util.js`);
+  const fleet = require(`${__hooks}/lib/fleet.js`);
+  const calc = require(`${__hooks}/lib/calc.js`);
+  const companyId = String((e.requestInfo().query || {}).company || "");
+  if (!hasRole(membershipOf(e.app, companyId, e.auth.id), ["owner", "manager", "dispatcher", "accountant", "mechanic"])) {
+    throw new ForbiddenError("Состояние ТО видят офис и механик");
+  }
+  const order = { overdue: 0, soon: 1, unknown: 2, ok: 3 };
+  const rows = [];
+  for (const p of e.app.findRecordsByFilter("maintenance_plans", "company = {:c} && active = true", "", 0, 0, { c: companyId })) {
+    let v = null;
+    try { v = e.app.findRecordById("vehicles", p.get("vehicle")); } catch (_) { continue; }
+    const st = calc.maintenanceStatus(fleet.planOf(p), fleet.readingsOf(v), fleet.today());
+    const open = e.app.findRecordsByFilter("tasks", "maintenance_plan = {:p} && status != 'done' && status != 'cancelled'",
+      "", 1, 0, { p: p.id });
+    rows.push({ plan: p.id, name: p.get("name"), vehicle: v.id, vehicle_name: fleet.vehicleName(v),
+      odometer_now: v.get("odometer_now"), engine_hours_now: v.get("engine_hours_now"), readings_at: v.getString("readings_at"),
+      status: st.status, parts: st.parts, task: open.length ? open[0].id : "" });
+  }
+  rows.sort((a, b) => order[a.status] - order[b.status] || a.vehicle_name.localeCompare(b.vehicle_name));
+  return e.json(200, { rows });
+}, $apis.requireAuth("users"));
+
+// Проверить сроки ТО сейчас и поставить задачи (иначе это делает расписание раз в час).
+// POST /api/ordius/maintenance/sync { company } — руководство и механик.
+routerAdd("POST", "/api/ordius/maintenance/sync", (e) => {
+  const { membershipOf, hasRole } = require(`${__hooks}/lib/util.js`);
+  const fleet = require(`${__hooks}/lib/fleet.js`);
+  const calc = require(`${__hooks}/lib/calc.js`);
+  const companyId = String((e.requestInfo().body || {}).company || "");
+  if (!hasRole(membershipOf(e.app, companyId, e.auth.id), ["owner", "manager", "mechanic"])) {
+    throw new ForbiddenError("Только руководство и механик");
+  }
+  return e.json(200, { created: fleet.syncMaintenanceTasks(e.app, calc, "company = {:c}", { c: companyId }) });
+}, $apis.requireAuth("users"));
+
+// ГСМ за период по каждой машине: пробег и моточасы по путевым, расход против нормы, заправки против путевых.
+// GET /api/ordius/fuel?company=…&from=…&to=…[&vehicle=…][&format=csv] — офис и механик.
+routerAdd("GET", "/api/ordius/fuel", (e) => {
+  const { membershipOf, hasRole } = require(`${__hooks}/lib/util.js`);
+  const fleet = require(`${__hooks}/lib/fleet.js`);
+  const calc = require(`${__hooks}/lib/calc.js`);
+  const q = e.requestInfo().query || {};
+  const companyId = String(q.company || "");
+  const from = String(q.from || "").slice(0, 10);
+  const to = String(q.to || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    throw new BadRequestError("Укажите период: from и to в виде ГГГГ-ММ-ДД");
+  }
+  if (!hasRole(membershipOf(e.app, companyId, e.auth.id), ["owner", "manager", "dispatcher", "accountant", "mechanic"])) {
+    throw new ForbiddenError("Учёт ГСМ видят офис и механик");
+  }
+  const p = { c: companyId, v: String(q.vehicle || ""), from: from + " 00:00:00.000Z", to: to + " 23:59:59.999Z" };
+  const byVehicle = q.vehicle ? " && vehicle = {:v}" : "";
+  const vehicles = e.app.findRecordsByFilter("vehicles", "company = {:c}" + (q.vehicle ? " && id = {:v}" : ""), "name", 0, 0, p);
+  const entries = {};
+  for (const r of e.app.findRecordsByFilter("shift_entries",
+    "company = {:c} && vehicle != '' && shift.date >= {:from} && shift.date <= {:to}" + byVehicle, "", 0, 0, p)) {
+    (entries[r.get("vehicle")] = entries[r.get("vehicle")] || []).push({
+      odometer_start: r.get("odometer_start"), odometer_end: r.get("odometer_end"),
+      engine_hours_start: r.get("engine_hours_start"), engine_hours_end: r.get("engine_hours_end"),
+      fuel_start: r.get("fuel_start"), fuel_end: r.get("fuel_end"), fuel_added: r.get("fuel_added"),
+    });
+  }
+  const logs = {};
+  for (const r of e.app.findRecordsByFilter("fuel_logs", "company = {:c} && at >= {:from} && at <= {:to}" + byVehicle, "", 0, 0, p)) {
+    (logs[r.get("vehicle")] = logs[r.get("vehicle")] || []).push({ liters: r.get("liters"), amount_kop: r.get("amount_kop") });
+  }
+  const rows = [];
+  for (const v of vehicles) {
+    if (!entries[v.id] && !logs[v.id]) continue;
+    rows.push(Object.assign({ vehicle: v.id, vehicle_name: fleet.vehicleName(v),
+      fuel_norm_100km: v.get("fuel_norm_100km") || null, fuel_norm_hour: v.get("fuel_norm_hour") || null },
+    calc.fuelSummary({ fuel_norm_100km: v.get("fuel_norm_100km"), fuel_norm_hour: v.get("fuel_norm_hour") },
+      entries[v.id] || [], logs[v.id] || [])));
+  }
+  if (q.format === "csv") {
+    const num = (x) => (x === null || x === undefined ? "" : String(x).replace(".", ","));
+    const esc = (x) => '"' + String(x || "").replace(/"/g, '""') + '"';
+    const head = ["Техника", "Км", "Моточасы", "Расход по путевым, л", "Норма, л", "Перерасход, л", "Перерасход, %",
+      "Заправлено по чекам и картам, л", "Сумма заправок, ₽", "Записано в путевых, л", "Не отражено в путевых, л"];
+    const out = [head.map(esc).join(";")].concat(rows.map((r) => [esc(r.vehicle_name), num(r.km), num(r.hours), num(r.used_l),
+      num(r.norm_l), num(r.overrun_l), num(r.overrun_pct), num(r.refueled_l), num(r.spent_kop / 100), num(r.added_waybills_l),
+      num(r.not_in_waybills_l)].join(";")));
+    e.response.header().set("Content-Type", "text/csv; charset=utf-8");
+    e.response.header().set("Content-Disposition", `attachment; filename="gsm-${from}_${to}.csv"`);
+    return e.string(200, "\uFEFF" + out.join("\r\n") + "\r\n");
+  }
+  return e.json(200, { from, to, rows });
+}, $apis.requireAuth("users"));

@@ -544,6 +544,116 @@ check("…но не другой водитель", (await list("messages", D2u.
 check("в чужую смену не написать", !is2xx(await create("messages", D2u.token, { company: companyA, shift: sb1.json.id, text: "x" })));
 check("чужая компания сообщения не видит", (await list("messages", B.token)).length === 0);
 
+// ---------- вахта: рейсы, суточные, дорога; ведомость «на руки» и с НДФЛ ----------
+const D2m = pre.json.id;
+await R({ name: "Суточные на вахте", unit: "per_diem", amount_kop: 70000 });
+await R({ name: "Рейс Досатуй", unit: "trip", amount_kop: 600000, member: D2m });
+const rotDone = await create("rotations", MGR.token, { company: companyA, member: D2m, site: site.json.id, date_from: "2026-11-01", date_to: "2026-11-15", status: "done" });
+check("вахта 1–15 ноября закончена", is2xx(rotDone), rotDone.json);
+check("изменение графика вахт — в журнале", (await list("audit_log", A.token, `collection_name = "rotations" && record_id = "${rotDone.json.id}"`)).length === 1);
+const vs = await create("shifts", D2u.token, { company: companyA, member: D2m, date: "2026-11-05", status: "draft" });
+const vsE = await E(D2u.token, { shift: vs.json.id, vehicle: vehicle1, unit: "trip", quantity: 2, waybill_no: "Д-15",
+  odometer_start: 120000, odometer_end: 120400, fuel_start: 200, fuel_added: 100, fuel_end: 160 });
+check("смена на вахте: 2 рейса с показаниями путевого", is2xx(vs) && is2xx(vsE), [vs.json, vsE.json]);
+await update("shifts", vs.json.id, D2u.token, { status: "submitted" });
+const vsC = await update("shifts", vs.json.id, A.token, { status: "confirmed" });
+check("2 рейса по 6 000 ₽ = 12 000 ₽", is2xx(vsC) && vsC.json.amount_kop === 1200000, vsC.json);
+check("дорогу вносит руководство", is2xx(await create("adjustments", A.token, { company: companyA, member: D2m, date: "2026-11-15", kind: "travel", amount_kop: 800000, note: "Билеты Новосибирск — Борзя и обратно" })));
+const pv = async () => {
+  const r = await api("GET", `/api/ordius/payroll?company=${companyA}&from=2026-11-01&to=2026-11-30&member=${D2m}`, { token: ACC.token });
+  return r.json && r.json.rows && r.json.rows[0];
+};
+let v1 = await pv();
+check("ведомость вахтовика: рейсы 12 000 + суточные 15 × 700 + дорога 8 000 = 30 500 ₽ на руки",
+  v1 && v1.earned_kop === 1200000 && v1.per_diem_days === 15 && v1.per_diem_kop === 1050000 && v1.travel_kop === 800000 &&
+  v1.accrued_kop === 3050000, v1);
+check("НДФЛ сверху, когда ставки «на руки»: с 12 000 ₽ — около 1 793 ₽; суточные до 700 ₽ и дорога без НДФЛ",
+  v1 && Math.abs(v1.ndfl_kop - 179300) <= 100 && v1.gross_kop === v1.accrued_kop + v1.ndfl_kop, v1);
+check("водитель не меняет настройку НДФЛ компании", !is2xx(await update("companies", companyA, D2u.token, { rates_basis: "gross" })));
+check("руководство переключает: ставки до НДФЛ", is2xx(await update("companies", companyA, A.token, { rates_basis: "gross" })));
+v1 = await pv();
+check("ставки до НДФЛ: 13 % удерживается из 12 000 ₽",
+  v1 && Math.abs(v1.ndfl_kop - 156000) <= 100 && v1.accrued_kop === 1200000 - v1.ndfl_kop + 1050000 + 800000, v1);
+await update("companies", companyA, A.token, { rates_basis: "net" });
+check("самозанятому НДФЛ не считается", is2xx(await update("memberships", D2m, A.token, { no_ndfl: true })) && (await pv()).ndfl_kop === 0);
+await update("memberships", D2m, A.token, { no_ndfl: false });
+const vCsv = await api("GET", `/api/ordius/payroll?company=${companyA}&from=2026-11-01&to=2026-11-30&format=csv`, { token: ACC.token });
+check("в CSV ведомости — дни вахты, суточные, дорога, НДФЛ, на руки",
+  vCsv.status === 200 && ["Дней вахты", "Суточные", "Дорога", "НДФЛ", "На руки"].every((h) => vCsv.text.includes(h)) && vCsv.text.includes("10500,00"), vCsv.text.slice(0, 400));
+const plannedOnly = await api("GET", `/api/ordius/payroll?company=${companyA}&from=2026-12-01&to=2026-12-31&member=${d1Membership}`, { token: A.token });
+check("запланированная вахта суточных не даёт", plannedOnly.json && plannedOnly.json.rows[0].per_diem_days === 0, plannedOnly.json);
+
+// ---------- показания, ТО по пробегу, заправки ----------
+const vh = async () => (await view("vehicles", vehicle1, A.token)).json;
+check("показания из путевого попали в карточку машины", (await vh()).odometer_now === 120400, await vh());
+check("норма расхода заводится", is2xx(await update("vehicles", vehicle1, A.token, { fuel_norm_100km: 30 })));
+const mp = await create("maintenance_plans", MECH.token, { company: companyA, vehicle: vehicle1, name: "ТО-1: масло и фильтры", interval_km: 10000, last_km: 111000, active: true });
+check("механик заводит план ТО каждые 10 000 км", is2xx(mp), mp.json);
+check("водитель план ТО не заводит", !is2xx(await create("maintenance_plans", D1.token, { company: companyA, vehicle: vehicle1, name: "x", interval_km: 1, active: true })));
+check("водитель видит план ТО", (await list("maintenance_plans", D1.token)).length === 1);
+const sync1 = await api("POST", "/api/ordius/maintenance/sync", { token: MECH.token, body: { company: companyA } });
+const mTasks = () => list("tasks", MECH.token, `maintenance_plan = "${mp.json.id}"`);
+let mt = await mTasks();
+check("до ТО 600 км — механику задача «скоро»", is2xx(sync1) && sync1.json.created === 1 && mt.length === 1 &&
+  mt[0].assignee_role === "mechanic" && mt[0].priority === "normal" && mt[0].vehicle === vehicle1 && /600 км/.test(mt[0].description), [sync1.json, mt]);
+check("повторная проверка задачу не дублирует", (await api("POST", "/api/ordius/maintenance/sync", { token: MECH.token, body: { company: companyA } })).json.created === 0);
+check("водитель проверку ТО не запускает", (await api("POST", "/api/ordius/maintenance/sync", { token: D1.token, body: { company: companyA } })).status === 403);
+check("задачу по ТО вручную не привязать", (await create("tasks", D1.token, { company: companyA, title: "x", status: "new", maintenance_plan: mp.json.id })).status === 400);
+
+const fl = await create("fuel_logs", D1.token, { company: companyA, vehicle: vehicle1, member: d1Membership, card: fc.json.id,
+  at: "2026-11-05 10:00:00.000Z", liters: 100, amount_kop: 700000, fuel: "diesel", source: "card", odometer: 121200 });
+check("водитель вносит свою заправку, автор — он сам", is2xx(fl) && fl.json.created_by === D1.id, fl.json);
+check("…и может её поправить в течение суток", is2xx(await update("fuel_logs", fl.json.id, D1.token, { station: "АЗС №12" })));
+check("водитель не вносит заправку за другого", !is2xx(await create("fuel_logs", D1.token, { company: companyA, vehicle: vehicle1, member: D2m, at: "2026-11-05 10:00:00.000Z", liters: 10 })));
+check("водитель не вносит заправку без себя", !is2xx(await create("fuel_logs", D1.token, { company: companyA, vehicle: vehicle1, at: "2026-11-05 10:00:00.000Z", liters: 10 })));
+check("водитель не переписывает заправку на другого", !is2xx(await update("fuel_logs", fl.json.id, D1.token, { member: D2m })));
+check("подделать автора заправки нельзя", (await create("fuel_logs", D1.token, { company: companyA, vehicle: vehicle1, member: d1Membership, at: "2026-11-05 11:00:00.000Z", liters: 5, created_by: A.id })).status === 400);
+check("заправку на чужую машину не внести", !is2xx(await create("fuel_logs", A.token, { company: companyA, vehicle: vB.json.id, at: "2026-11-05 10:00:00.000Z", liters: 10 })));
+check("пробег с заправки — в карточку машины", (await vh()).odometer_now === 121200);
+mt = await mTasks();
+check("перепробег 200 км — задача та же, приоритет высокий", mt.length === 1 && mt[0].priority === "high", mt);
+const typo = await create("fuel_logs", A.token, { company: companyA, vehicle: vehicle1, at: "2026-11-07 09:00:00.000Z", liters: 50, amount_kop: 350000, source: "cash", odometer: 999999 });
+check("опечатка в одометре не становится текущим пробегом", is2xx(typo) && (await vh()).odometer_now === 121200, await vh());
+check("механик видит все заправки", (await list("fuel_logs", MECH.token)).length === 2);
+check("другой водитель чужих заправок не видит", (await list("fuel_logs", D2u.token)).length === 0);
+check("чужая компания заправок не видит", (await list("fuel_logs", B.token)).length === 0);
+
+const ml = await create("maintenance_logs", MECH.token, { company: companyA, vehicle: vehicle1, plan: mp.json.id, date: "2026-11-06",
+  kind: "service", description: "Масло ДВС, фильтры масляный и топливный", odometer: 121250, cost_kop: 1500000 });
+check("механик вносит выполненное ТО", is2xx(ml) && ml.json.created_by === MECH.id, ml.json);
+check("план ТО сдвинулся: следующее на 131 250 км", (await view("maintenance_plans", mp.json.id, MECH.token)).json.last_km === 121250);
+mt = await mTasks();
+check("задача по ТО закрылась сама, с записью в истории", mt.length === 1 && mt[0].status === "done" &&
+  (await list("task_events", MECH.token, `task = "${mt[0].id}" && to_status = "done"`)).length === 1, mt);
+check("ТО по плану другой машины не внести", !is2xx(await create("maintenance_logs", MECH.token, { company: companyA, vehicle: vehicle2, plan: mp.json.id, date: "2026-11-06", kind: "service" })));
+check("водитель журнал ТО с затратами не видит", (await list("maintenance_logs", D1.token)).length === 0);
+const mst = await api("GET", `/api/ordius/maintenance?company=${companyA}`, { token: MECH.token });
+check("состояние ТО: после обслуживания — в порядке", is2xx(mst) && mst.json.rows.length === 1 && mst.json.rows[0].status === "ok" &&
+  mst.json.rows[0].parts[0].next === 131250, mst.json);
+check("водителю сводка ТО не отдаётся", (await api("GET", `/api/ordius/maintenance?company=${companyA}`, { token: D1.token })).status === 403);
+const mpDays = await create("maintenance_plans", A.token, { company: companyA, vehicle: vehicle2, name: "Техосмотр", interval_days: 365, last_date: "2025-01-10", active: true });
+await api("POST", "/api/ordius/maintenance/sync", { token: A.token, body: { company: companyA } });
+check("ТО по сроку: прошёл год — задача механику", is2xx(mpDays) && (await list("tasks", MECH.token, `maintenance_plan = "${mpDays.json.id}"`)).length === 1);
+
+const gsm = await api("GET", `/api/ordius/fuel?company=${companyA}&from=2026-11-01&to=2026-11-30`, { token: ACC.token });
+const g1 = gsm.json && gsm.json.rows.find((r) => r.vehicle === vehicle1);
+check("ГСМ: 400 км, по путевому 140 л при норме 120 л — перерасход 20 л", g1 && g1.km === 400 && g1.used_l === 140 && g1.norm_l === 120 && g1.overrun_l === 20, gsm.json);
+check("ГСМ: по чекам и карте 150 л, в путевых 100 л — 50 л не отражено", g1 && g1.refueled_l === 150 && g1.not_in_waybills_l === 50 && g1.spent_kop === 1050000, g1);
+const gsmCsv = await api("GET", `/api/ordius/fuel?company=${companyA}&from=2026-11-01&to=2026-11-30&format=csv`, { token: MECH.token });
+check("ГСМ в CSV", gsmCsv.status === 200 && gsmCsv.text.includes("Перерасход") && gsmCsv.text.includes("Шакман"), gsmCsv.text.slice(0, 300));
+check("водителю отчёт по ГСМ не отдаётся", (await api("GET", `/api/ordius/fuel?company=${companyA}&from=2026-11-01&to=2026-11-30`, { token: D1.token })).status === 403);
+
+// ---------- офлайн: приложение задаёт id само, повторная отправка не создаёт дубль ----------
+const offId = "off" + Date.now().toString(36).slice(-8).padStart(12, "0");
+const off1 = await api("POST", "/api/collections/shifts/records", { token: D2u.token, body: { id: offId, company: companyA, member: D2m, date: "2026-11-06", status: "draft" } });
+check("смена, созданная без связи, приходит со своим id", is2xx(off1) && off1.json.id === offId, off1.json);
+const off2 = await api("POST", "/api/collections/shifts/records", { token: D2u.token, body: { id: offId, company: companyA, member: D2m, date: "2026-11-06", status: "draft" } });
+check("повторная отправка той же смены дубль не создаёт", !is2xx(off2) && (await list("shifts", D2u.token, `id = "${offId}"`)).length === 1, off2.json);
+
+// ---------- объявления со сроком ----------
+const post8 = await create("posts", A.token, { company: companyA, text: "8 марта — выходной у всех", pinned: true, until: "2027-03-08" });
+check("объявление со сроком показа", is2xx(post8) && post8.json.until.startsWith("2027-03-08"), post8.json);
+
 // ---------- роль владельца ----------
 check("руководитель не делает себя владельцем", (await update("memberships", MGR.membership, MGR.token, { roles: ["owner"] })).status === 403);
 check("руководитель не увольняет владельца", (await update("memberships", ownerMembership, MGR.token, { status: "dismissed" })).status === 403);

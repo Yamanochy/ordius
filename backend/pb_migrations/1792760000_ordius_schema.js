@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 // Схема Ordius: компании, участники и роли, справочники, контракты заказчиков, смены, ставки, выручка,
-// выплаты, задачи, документы, топливные карты, вахты, сообщения.
+// выплаты, задачи, документы, топливные карты, заправки, ТО, вахты, сообщения.
 //
 // Главный принцип: человек видит и меняет данные только тех компаний, где он активный участник,
 // и только в пределах своих ролей. Это проверяют правила доступа PocketBase на каждом запросе.
@@ -93,6 +93,10 @@ migrate((app) => {
     text("inn", { pattern: "^[0-9]{10}([0-9]{2})?$", max: 12 }),
     text("join_code", { max: 16 }),
     select("plan", ["pilot", "free", "start", "business"]),
+    // ставки вносятся «на руки» (net, по умолчанию) или до НДФЛ (gross) — от этого считается НДФЛ в ведомости
+    select("rates_basis", ["net", "gross"]),
+    // суточные без НДФЛ, коп. в день; пусто — 700 ₽ (п. 3 ст. 217 НК РФ)
+    int("per_diem_free_kop", { min: 0, max: 10000000 }),
     rel("created_by", users.id),
     created(), updated(),
   ], ["CREATE UNIQUE INDEX idx_companies_join_code ON companies (join_code) WHERE join_code != ''"]);
@@ -105,6 +109,8 @@ migrate((app) => {
     select("roles", ROLES, { required: true, maxSelect: ROLES.length }),
     select("status", ["pending", "active", "dismissed"], { required: true }),
     text("personnel_no", { max: 32 }),
+    // НДФЛ не удерживается: самозанятый, ИП
+    bool("no_ndfl"),
     date("hired_on"), date("dismissed_on"),
     text("note", { max: 1000 }),
     // личное приглашение для заведённого руководителем человека (видит только сервер)
@@ -132,6 +138,13 @@ migrate((app) => {
     int("year", { min: 1950, max: 2100 }),
     text("vin", { max: 32 }),
     bool("active"),
+    // нормы расхода топлива: л на 100 км и л на моточас (для спецтехники, работающей на месте)
+    num("fuel_norm_100km", { min: 0, max: 1000 }),
+    num("fuel_norm_hour", { min: 0, max: 500 }),
+    // последние показания: руководитель вносит начальные, дальше сервер поднимает их по путевым, заправкам и ТО
+    num("odometer_now", { min: 0, max: 10000000 }),
+    num("engine_hours_now", { min: 0, max: 1000000 }),
+    date("readings_at"),
     text("note", { max: 1000 }),
     created(), updated(),
   ], ["CREATE INDEX idx_vehicles_company ON vehicles (company)"]);
@@ -194,16 +207,20 @@ migrate((app) => {
     rel("customer", customers.id),
     rel("contract", contracts.id),
     text("address", { max: 300 }),
+    // координаты — для карты и маршрутов
+    num("lat", { min: -90, max: 90 }),
+    num("lng", { min: -180, max: 180 }),
     bool("active"),
     text("note", { max: 1000 }),
     created(), updated(),
   ], ["CREATE INDEX idx_sites_company ON sites (company)"]);
 
   // ---------- ставки: действуют с даты; самая точная (по водителю, технике, объекту, заказчику) побеждает ----------
+  // per_diem — суточные за каждый день вахты (по графику вахт), month — оклад
   const rates = make("rates", [
     rel("company", companies.id, { required: true }),
     text("name", { max: 120 }),
-    select("unit", [...UNITS, "month"], { required: true }),
+    select("unit", [...UNITS, "month", "per_diem"], { required: true }),
     int("amount_kop", { required: true, min: 0, max: 100000000 }),
     rel("member", memberships.id),
     rel("vehicle", vehicles.id),
@@ -295,7 +312,8 @@ migrate((app) => {
     rel("company", companies.id, { required: true }),
     rel("member", memberships.id, { required: true }),
     date("date", { required: true }),
-    select("kind", ["damage", "fuel", "fine", "bonus", "other"], { required: true }),
+    // travel — компенсация дороги на вахту и обратно (плюсом, без НДФЛ)
+    select("kind", ["damage", "fuel", "fine", "bonus", "travel", "other"], { required: true }),
     int("amount_kop", { required: true, min: -100000000, max: 100000000 }),
     text("note", { max: 1000 }),
     rel("created_by", users.id),
@@ -319,6 +337,24 @@ migrate((app) => {
     created(), updated(),
   ], ["CREATE INDEX idx_payouts_member ON payouts (member, paid_on)"]);
 
+  // ---------- ТО по пробегу, моточасам и времени ----------
+  // План: что и как часто делать с машиной. Последнее выполнение вносится вручную один раз,
+  // дальше его обновляет сервер по журналу ТО. Когда срок подходит, сервер ставит задачу механику.
+  const maintenancePlans = make("maintenance_plans", [
+    rel("company", companies.id, { required: true }),
+    rel("vehicle", vehicles.id, { required: true, cascadeDelete: true }),
+    text("name", { required: true, max: 200 }),
+    num("interval_km", { min: 0, max: 1000000 }),
+    num("interval_hours", { min: 0, max: 100000 }),
+    int("interval_days", { min: 0, max: 3650 }),
+    num("last_km", { min: 0, max: 10000000 }),
+    num("last_hours", { min: 0, max: 1000000 }),
+    date("last_date"),
+    bool("active"),
+    text("note", { max: 1000 }),
+    created(), updated(),
+  ], ["CREATE INDEX idx_maintenance_plans_vehicle ON maintenance_plans (company, vehicle)"]);
+
   // ---------- задачи и обсуждения ----------
   const tasks = make("tasks", [
     rel("company", companies.id, { required: true }),
@@ -330,6 +366,8 @@ migrate((app) => {
     select("assignee_role", ROLES),
     rel("vehicle", vehicles.id),
     rel("shift", shifts.id),
+    // задача, поставленная сервером по плану ТО
+    rel("maintenance_plan", maintenancePlans.id),
     rel("created_by", users.id),
     date("due"), date("closed_at"),
     created(), updated(),
@@ -351,6 +389,8 @@ migrate((app) => {
     rel("author", users.id),
     text("text", { required: true, max: 5000 }),
     bool("pinned"),
+    // до какого дня показывать (например, «завтра выходной»); пусто — без срока
+    date("until"),
     created(), updated(),
   ], ["CREATE INDEX idx_posts_company ON posts (company)"]);
 
@@ -394,6 +434,51 @@ migrate((app) => {
     text("note", { max: 1000 }),
     created(), updated(),
   ], ["CREATE INDEX idx_fuel_cards_company ON fuel_cards (company)"]);
+
+  // ---------- заправки: по карте, за наличные, из своей ёмкости ----------
+  const fuelLogs = make("fuel_logs", [
+    rel("company", companies.id, { required: true }),
+    rel("vehicle", vehicles.id, { required: true }),
+    rel("member", memberships.id),
+    rel("card", fuelCards.id),
+    date("at", { required: true }),
+    num("liters", { required: true, min: 0.1, max: 5000 }),
+    int("amount_kop", { min: 0, max: 100000000 }),
+    select("fuel", ["diesel", "ai92", "ai95", "gas", "other"]),
+    select("source", ["card", "cash", "tank", "other"]),
+    text("station", { max: 200 }),
+    num("odometer", { min: 0, max: 10000000 }),
+    num("engine_hours", { min: 0, max: 1000000 }),
+    {
+      name: "receipt", type: "file", required: false, maxSelect: 3, maxSize: 15 * 1024 * 1024,
+      mimeTypes: ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"],
+      thumbs: ["480x0"], protected: true,
+    },
+    text("note", { max: 1000 }),
+    rel("created_by", users.id),
+    created(), updated(),
+  ], [
+    "CREATE INDEX idx_fuel_logs_company_at ON fuel_logs (company, at)",
+    "CREATE INDEX idx_fuel_logs_vehicle_at ON fuel_logs (vehicle, at)",
+  ]);
+
+  // ---------- журнал ТО и ремонтов ----------
+  const maintenanceLogs = make("maintenance_logs", [
+    rel("company", companies.id, { required: true }),
+    rel("vehicle", vehicles.id, { required: true }),
+    rel("plan", maintenancePlans.id),
+    rel("task", tasks.id),
+    date("date", { required: true }),
+    select("kind", ["service", "repair", "inspection", "tires", "other"], { required: true }),
+    text("description", { max: 5000 }),
+    num("odometer", { min: 0, max: 10000000 }),
+    num("engine_hours", { min: 0, max: 1000000 }),
+    int("cost_kop", { min: 0, max: 100000000 }),
+    rel("performed_by", memberships.id),
+    text("performer", { max: 200 }),
+    rel("created_by", users.id),
+    created(), updated(),
+  ], ["CREATE INDEX idx_maintenance_logs_vehicle ON maintenance_logs (company, vehicle, date)"]);
 
   // ---------- график вахт (45×45 и любые другие) ----------
   const rotations = make("rotations", [
@@ -523,6 +608,41 @@ migrate((app) => {
 
   // график видят все в компании; ведут владелец, руководитель, диспетчер
   const PLAN = ["owner", "manager", "dispatcher"];
+  // кто занимается техникой: ТО и ремонты
+  const FLEET = ["owner", "manager", "mechanic"];
+  const FLEET_SEE = ["owner", "manager", "dispatcher", "accountant", "mechanic"];
+
+  // заправки: офис и механик видят все, водитель — свои; водитель вносит только свои и может
+  // исправить или удалить их в течение суток, дальше — диспетчер или руководство
+  rules(fuelLogs, {
+    listRule: `(${role("company", FLEET_SEE)}) || member.user = @request.auth.id`,
+    viewRule: `(${role("company", FLEET_SEE)}) || member.user = @request.auth.id`,
+    createRule: `${member("company")} && vehicle.company = company && (card = "" || card.company = company) && ` +
+      `(member = "" || member.company = company) && ((${role("company", PLAN)}) || member.user = @request.auth.id)`,
+    updateRule: `@request.body.company:changed = false && ((${role("company", PLAN)}) || ` +
+      `(${member("company")} && member.user = @request.auth.id && created_by = @request.auth.id && created >= @yesterday && ` +
+      `@request.body.member:changed = false))`,
+    deleteRule: `(${role("company", PLAN)}) || ` +
+      `(${member("company")} && created_by = @request.auth.id && created >= @yesterday)`,
+  });
+
+  // план ТО видят все (водитель знает, что машине скоро ТО), ведут руководство и механик
+  rules(maintenancePlans, {
+    listRule: member("company"),
+    viewRule: member("company"),
+    createRule: role("company", FLEET),
+    updateRule: `${role("company", FLEET)} && @request.body.company:changed = false && @request.body.vehicle:changed = false`,
+    deleteRule: role("company", FLEET),
+  });
+
+  // журнал ТО с затратами — офис и механик
+  rules(maintenanceLogs, {
+    listRule: role("company", FLEET_SEE),
+    viewRule: role("company", FLEET_SEE),
+    createRule: `${role("company", FLEET)} && (plan = "" || plan.vehicle = vehicle)`,
+    updateRule: `${role("company", FLEET)} && @request.body.company:changed = false && (plan = "" || plan.vehicle = vehicle)`,
+    deleteRule: role("company", MGMT),
+  });
   rules(rotations, {
     listRule: member("company"),
     viewRule: member("company"),
@@ -664,7 +784,8 @@ migrate((app) => {
     deleteRule: null,
   });
 }, (app) => {
-  for (const name of ["audit_log", "messages", "rotations", "fuel_cards", "documents", "posts", "task_events", "tasks",
+  for (const name of ["audit_log", "messages", "rotations", "maintenance_logs", "fuel_logs", "fuel_cards", "documents",
+    "posts", "task_events", "tasks", "maintenance_plans",
     "payouts", "adjustments", "shift_bills", "shift_entries", "shifts", "rate_factors", "rates", "sites",
     "contract_prices", "contract_items", "contracts", "customers", "vehicles", "memberships", "companies",
     "phone_checks"]) {

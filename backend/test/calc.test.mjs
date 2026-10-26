@@ -150,4 +150,96 @@ t("новые единицы оплаты: км и тонны из замеро�
   assert.equal(calc.quantity({ unit: "lin_m", quantity: 1500 }), 1500);
 });
 
+// ---------- вахта, НДФЛ, ТО, ГСМ ----------
+const pdRates = [rate({ id: "pd", unit: "per_diem", amount_kop: 70000 }), rate({ id: "pd-dos", unit: "per_diem", amount_kop: 100000, site: "dos" })];
+
+t("суточные: дни закончившейся вахты внутри периода", () => {
+  const r = calc.perDiemForPeriod([{ member: "m1", site: "", status: "done", date_from: "2026-09-20", date_to: "2026-10-10" }],
+    pdRates, "2026-10-01", "2026-10-31", "2026-11-05", 70000);
+  assert.equal(r.days, 10);
+  assert.equal(r.amount_kop, 700000);
+  assert.equal(r.taxable_kop, 0);
+});
+
+t("суточные: идущая вахта — только по сегодняшний день, запланированная не считается", () => {
+  const r = calc.perDiemForPeriod([
+    { member: "m1", status: "active", date_from: "2026-10-01", date_to: "2026-11-14" },
+    { member: "m1", status: "planned", date_from: "2026-11-20", date_to: "2026-11-30" },
+  ], pdRates, "2026-10-01", "2026-10-31", "2026-10-05", 70000);
+  assert.equal(r.days, 5);
+});
+
+t("суточные сверх 700 ₽ в день облагаются НДФЛ", () => {
+  const r = calc.perDiemForPeriod([{ member: "m1", site: "dos", status: "done", date_from: "2026-10-01", date_to: "2026-10-03" }],
+    pdRates, "2026-10-01", "2026-10-31", "2026-11-01", 70000);
+  assert.equal(r.amount_kop, 300000);
+  assert.equal(r.free_kop, 210000);
+  assert.equal(r.taxable_kop, 90000);
+});
+
+t("суточные: дни без ставки видны отдельно", () => {
+  const r = calc.perDiemForPeriod([{ member: "m1", status: "done", date_from: "2025-12-30", date_to: "2026-01-02" }],
+    pdRates, "2025-12-01", "2026-01-31", "2026-02-01", 70000);
+  assert.equal(r.days, 2);
+  assert.equal(r.missing_days, 2);
+});
+
+t("НДФЛ: 13 % до 2,4 млн, 15 % сверх — нарастающим итогом", () => {
+  assert.equal(calc.ndflPeriod("gross", 0, 10000000), 1300000);
+  assert.equal(calc.ndflPeriod("gross", 230000000, 20000000), 1300000 + 1500000);
+  assert.equal(calc.ndflCumulative(1000050), 130000);   // 1 300,0065 ₽ → 1 300 ₽, в полных рублях
+});
+
+t("НДФЛ, когда ставки «на руки»: налог сверху", () => {
+  assert.equal(calc.ndflPeriod("net", 0, 8700000), 1300000);
+  assert.equal(calc.grossCumulative(8700000), 10000000);
+  assert.equal(calc.ndflPeriod("net", 0, 0), 0);
+});
+
+t("ведомость: рейсы, суточные, дорога, НДФЛ на руки", () => {
+  // вахта: 10 рейсов по 6 000 ₽, 30 дней суточных по 700 ₽, дорога 8 000 ₽, штраф 1 000 ₽, аванс 20 000 ₽
+  const perDiem = { days: 30, amount_kop: 2100000, free_kop: 2100000, taxable_kop: 0 };
+  const input = { shifts: [{ status: "confirmed", amount_kop: 6000000 }], monthRates: [], from: "2026-10-01", to: "2026-10-31",
+    adjustments: [{ kind: "travel", amount_kop: 800000 }, { kind: "fine", amount_kop: -100000 }],
+    payouts: [{ status: "paid", amount_kop: 2000000 }], perDiem };
+  const base = calc.payComponents(input).taxable_kop;
+  assert.equal(base, 6000000);
+  const net = calc.payrollSummary({ ...input, basis: "net", ndfl_kop: calc.ndflPeriod("net", 0, base) });
+  // 68 965 ₽ начислено − 8 965 ₽ НДФЛ (13 % в полных рублях) = 60 000 ₽ на руки
+  assert.equal(net.ndfl_kop, 896500);
+  assert.equal(6000000 + 896500 - calc.ndflCumulative(6000000 + 896500), 6000000);
+  assert.equal(net.accrued_kop, 6000000 + 2100000 + 800000 - 100000);   // на руки — как договорились
+  assert.equal(net.gross_kop, 6000000 + net.ndfl_kop + 2100000 + 800000);
+  assert.equal(net.due_kop, net.accrued_kop - 2000000);
+  const gross = calc.payrollSummary({ ...input, basis: "gross", ndfl_kop: calc.ndflPeriod("gross", 0, base) });
+  assert.equal(gross.ndfl_kop, 780000);
+  assert.equal(gross.accrued_kop, 6000000 - 780000 + 2100000 + 800000 - 100000);
+});
+
+t("ТО: осталось, скоро, просрочено — по км, моточасам и дням", () => {
+  const plan = { interval_km: 10000, last_km: 50000, interval_hours: 500, last_hours: 1000, interval_days: 180, last_date: "2026-05-01" };
+  assert.equal(calc.maintenanceStatus(plan, { odometer_now: 55000, engine_hours_now: 1100 }, "2026-07-01").status, "ok");
+  const soon = calc.maintenanceStatus(plan, { odometer_now: 59200, engine_hours_now: 1100 }, "2026-07-01");
+  assert.equal(soon.status, "soon");
+  assert.equal(soon.parts[0].left, 800);
+  assert.equal(calc.maintenanceStatus(plan, { odometer_now: 55000, engine_hours_now: 1510 }, "2026-07-01").status, "overdue");
+  assert.equal(calc.maintenanceStatus(plan, { odometer_now: 55000, engine_hours_now: 1100 }, "2026-10-29").status, "overdue");
+  assert.equal(calc.maintenanceStatus({ interval_days: 365 }, {}, "2026-07-01").status, "unknown");
+});
+
+t("ГСМ: расход по путевым против нормы и заправки мимо путевых", () => {
+  const r = calc.fuelSummary({ fuel_norm_100km: 35, fuel_norm_hour: 0 }, [
+    { odometer_start: 100000, odometer_end: 100400, fuel_start: 200, fuel_added: 100, fuel_end: 140 },
+    { odometer_start: 100400, odometer_end: 100800, fuel_start: 140, fuel_added: 0, fuel_end: 0 },
+    { odometer_start: 100800, odometer_end: 101000 },   // без топлива — в норму не идёт
+  ], [{ liters: 100, amount_kop: 700000 }, { liters: 80, amount_kop: 560000 }]);
+  assert.equal(r.km, 1000);
+  assert.equal(r.used_l, 300);
+  assert.equal(r.norm_l, 280);
+  assert.equal(r.overrun_l, 20);
+  assert.equal(r.refueled_l, 180);
+  assert.equal(r.not_in_waybills_l, 80);
+  assert.equal(r.spent_kop, 1260000);
+});
+
 console.log(`\n${n} проверок расчёта прошло`);
