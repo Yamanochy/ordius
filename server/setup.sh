@@ -73,6 +73,8 @@ ask_secret() {
       printf '\n' > /dev/tty
     fi
   fi
+  # пробелы по краям — частый след копирования из панели
+  value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
   [ -n "$value" ] || die "пустое значение: $prompt"
   printf -v "$var" '%s' "$value"
 }
@@ -277,7 +279,7 @@ EOF
   umask 022
 fi
 chmod 600 "$ORDIUS_ETC/backup.env"
-/usr/local/sbin/ordius-s3-setup || { rm -f "$ORDIUS_ETC/backup.env"; die "нет доступа к бакету. Проверьте адрес, имя бакета и ключи и запустите скрипт ещё раз"; }
+/usr/local/sbin/ordius-s3-setup || { rm -f "$ORDIUS_ETC/backup.env"; die "нет доступа к бакету (причина строкой выше). Запустите скрипт ещё раз — он спросит ключи заново"; }
 
 new_restic_pass=0
 if [ ! -s "$ORDIUS_ETC/restic.pass" ]; then
