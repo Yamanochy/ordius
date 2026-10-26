@@ -40,7 +40,11 @@ jobs:
         working-directory: app
         run: npm ci && npm run build
       - name: app/dist в репозитории собран из этих исходников
-        run: git diff --stat --exit-code -- app/dist || (echo "Пересоберите приложение: cd app && npm run build — и закоммитьте app/dist" && exit 1)
+        run: |
+          if ! git diff --stat --exit-code -- app/dist; then
+            echo "Пересоберите приложение (cd app && npm run build) и закоммитьте app/dist"
+            exit 1
+          fi
       - name: Браузер для проверки
         run: |
           npm install -g "playwright@${PLAYWRIGHT_VERSION}"
