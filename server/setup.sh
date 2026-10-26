@@ -68,11 +68,16 @@ ask_secret() {
   local prompt=$1 var=$2 value=${!2:-}
   if [ -z "$value" ]; then
     # Подсказку печатаем сами: read -p пишет её в stderr, а он может быть перенаправлен.
-    if { printf '  %s: ' "$prompt" > /dev/tty; } 2>/dev/null; then
+    # Выключаем «защищённую вставку» терминала: в этом режиме вставленный текст приходит в обёртке
+    # ESC[200~ … ESC[201~, и ключ на 12 символов длиннее настоящего.
+    if { printf '\033[?2004l  %s: ' "$prompt" > /dev/tty; } 2>/dev/null; then
       IFS= read -r -s value < /dev/tty || true
       printf '\n' > /dev/tty
     fi
   fi
+  # Если обёртка всё же пришла — убираем её, а с ней любые невидимые управляющие символы.
+  value=${value//$'\033[200~'/}; value=${value//$'\033[201~'/}
+  value=$(printf '%s' "$value" | tr -d '[:cntrl:]')
   # пробелы по краям — частый след копирования из панели
   value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
   [ -n "$value" ] || die "пустое значение: $prompt"
