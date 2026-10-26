@@ -46,11 +46,12 @@ jobs:
             exit 1
           fi
       - name: Браузер для проверки
+        working-directory: app
         run: |
-          npm install -g "playwright@${PLAYWRIGHT_VERSION}"
-          playwright install --with-deps chromium
+          npm install --no-save "playwright@${PLAYWRIGHT_VERSION}"
+          npx playwright install --with-deps chromium
       - name: Сквозная проверка
-        run: NODE_PATH="$(npm root -g)" node app/test/e2e.mjs
+        run: node app/test/e2e.mjs
       - name: Скриншоты (при сбое)
         if: failure()
         uses: actions/upload-artifact@v4
