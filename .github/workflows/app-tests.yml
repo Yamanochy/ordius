@@ -15,7 +15,9 @@ permissions:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 закреплена: ubuntu-latest с октября 2026 переходит на 26.04, а Playwright 1.56 ставит
+    # системные библиотеки браузера только для известных ему версий Ubuntu
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       PB_VERSION: "0.40.5"
