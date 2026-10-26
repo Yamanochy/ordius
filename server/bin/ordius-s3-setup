@@ -51,10 +51,56 @@ def make_client(cfg, region, lookup):
 
 
 def works(s3, bucket):
-    """Бакет виден, в него можно записать и из него удалить — всё, что нужно restic."""
-    s3.head_bucket(Bucket=bucket)
+    """Бакет виден, в него можно записать и из него удалить — всё, что нужно restic.
+    Список, а не HEAD: на HEAD хранилище отвечает без тела, и причину отказа не узнать."""
+    s3.list_objects_v2(Bucket=bucket, MaxKeys=1)
     s3.put_object(Bucket=bucket, Key="ordius-probe", Body=b"ok")
     s3.delete_object(Bucket=bucket, Key="ordius-probe")
+
+
+def error_code(e):
+    if isinstance(e, ClientError):
+        return e.response.get("Error", {}).get("Code") or str(e.response.get("ResponseMetadata", {}).get("HTTPStatusCode", ""))
+    return type(e).__name__
+
+
+def key_info(v):
+    """Длина ключа и посторонние символы — без самого ключа."""
+    odd = [c for c in v if not (c.isascii() and (c.isalnum() or c in "+/=-_"))]
+    info = f"{len(v)} симв."
+    if odd:
+        kinds = []
+        if any(c.isspace() for c in odd):
+            kinds.append("пробелы")
+        if any(not c.isascii() and c.isalpha() for c in odd):
+            kinds.append("русские буквы")
+        if any(c in "*•●·…" for c in odd):
+            kinds.append("звёздочки/точки — скопирован скрытый ключ")
+        rest = [c for c in odd if not c.isspace() and not (not c.isascii() and c.isalpha()) and c not in "*•●·…"]
+        if any(not c.isprintable() for c in rest):
+            kinds.append("невидимые символы")
+        shown = sorted(set(c for c in rest if c.isprintable()))
+        if shown:
+            kinds.append("знаки " + " ".join(shown))
+        info += ", посторонние символы: " + ", ".join(kinds)
+    return info
+
+
+def explain(codes, bucket, cfg):
+    """Понятная причина отказа по кодам ошибок всех попыток (регион × адресация)."""
+    ak, sk = cfg.get("AWS_ACCESS_KEY_ID", ""), cfg.get("AWS_SECRET_ACCESS_KEY", "")
+    lens = f"(введено: Access key — {key_info(ak)}; Secret key — {key_info(sk)})"
+    if "InvalidAccessKeyId" in codes:
+        return f"хранилище не знает такой Access key — скопируйте его заново {lens}"
+    if "SignatureDoesNotMatch" in codes:
+        return f"Secret key не подходит к этому Access key — скопируйте Secret key заново {lens}"
+    if "NoSuchBucket" in codes:
+        return f"бакета {bucket} нет — проверьте имя бакета"
+    if "AccessDenied" in codes:
+        return f"ключи верные, но у них нет прав на бакет {bucket}"
+    if any(c in ("EndpointConnectionError", "ConnectTimeoutError", "ReadTimeoutError") for c in codes):
+        return f"не удаётся подключиться к {cfg['S3_ENDPOINT']}"
+    return "хранилище отклонило запрос, коды ответа: " + ", ".join(sorted(set(codes))) + " " + lens
 
 
 def candidates(cfg):
@@ -94,19 +140,25 @@ def main():
     bucket = cfg["S3_BUCKET"]
 
     s3 = None
-    last_error = None
+    codes = []
+    last = None
     for region, lookup in candidates(cfg):
         client = make_client(cfg, region, lookup)
         try:
             works(client, bucket)
         except (ClientError, BotoCoreError) as e:
-            last_error = e
+            codes.append(error_code(e))
+            last = e
             continue
         s3 = client
         break
     if s3 is None:
-        print(f"ОШИБКА: нет доступа к бакету {bucket}: {last_error}", file=sys.stderr)
-        print("Проверьте адрес хранилища, имя бакета и ключи (Access key / Secret key).", file=sys.stderr)
+        print(f"ОШИБКА: нет доступа к бакету {bucket}: {explain(codes, bucket, cfg)}", file=sys.stderr)
+        if isinstance(last, ClientError):
+            meta = last.response.get("ResponseMetadata", {})
+            server = meta.get("HTTPHeaders", {}).get("server", "?")
+            msg = last.response.get("Error", {}).get("Message", "")
+            print(f"  последний ответ: HTTP {meta.get('HTTPStatusCode')}, сервер {server}, «{msg[:120]}»", file=sys.stderr)
         return 1
     print(f"бакет {bucket}: доступ есть, запись и удаление работают (регион {region}, адресация {lookup})")
     if (region, lookup) != (cfg.get("S3_REGION"), cfg.get("S3_LOOKUP")):

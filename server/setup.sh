@@ -5,6 +5,8 @@
 #   bash setup.sh --domain app.ordius.ru --endpoint s3.ru1.storage.beget.cloud --bucket ИМЯ_БАКЕТА
 # Новый сервер вместо пропавшего — восстановить данные из копии:
 #   bash setup.sh --domain app.ordius.ru --endpoint s3.ru1.storage.beget.cloud --bucket ИМЯ_БАКЕТА --restore
+# Учения на временном сервере: восстановить и проверить, в хранилище копий ничего не писать:
+#   bash setup.sh --domain drill.ordius.ru --endpoint s3.ru1.storage.beget.cloud --bucket ИМЯ_БАКЕТА --drill
 # Хранилище копий — любое S3-совместимое в России. Для Selectel можно вместо --endpoint указать --pool ru-7.
 # Регион подписи и стиль адресации скрипт подбирает сам (или --region).
 #
@@ -20,7 +22,7 @@ ORDIUS_DATA=/var/lib/ordius
 ORDIUS_OPT=/opt/ordius
 REPO="$ORDIUS_OPT/repo"
 
-DOMAIN="" BUCKET="" POOL="" ENDPOINT="" REGION="" RESTORE=0 BRANCH=main
+DOMAIN="" BUCKET="" POOL="" ENDPOINT="" REGION="" RESTORE=0 DRILL=0 BRANCH=main
 ORIG_ARGS=("$@")
 
 say()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
@@ -29,7 +31,7 @@ warn() { printf '  \033[33m! %s\033[0m\n' "$*" >&2; }
 die()  { printf '\n\033[31mОШИБКА: %s\033[0m\n' "$*" >&2; exit 1; }
 trap 'die "сбой на строке $LINENO. Пришлите Claude последние строки вывода."' ERR
 
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -40,6 +42,7 @@ while [ $# -gt 0 ]; do
     --region)   REGION=${2:-}; shift 2 ;;
     --branch)   BRANCH=${2:-}; shift 2 ;;
     --restore)  RESTORE=1; shift ;;
+    --drill)    RESTORE=1; DRILL=1; shift ;;
     -h|--help)  usage 0 ;;
     *) printf 'Неизвестный параметр: %s\n\n' "$1"; usage 1 ;;
   esac
@@ -65,11 +68,18 @@ ask_secret() {
   local prompt=$1 var=$2 value=${!2:-}
   if [ -z "$value" ]; then
     # Подсказку печатаем сами: read -p пишет её в stderr, а он может быть перенаправлен.
-    if { printf '  %s: ' "$prompt" > /dev/tty; } 2>/dev/null; then
+    # Выключаем «защищённую вставку» терминала: в этом режиме вставленный текст приходит в обёртке
+    # ESC[200~ … ESC[201~, и ключ на 12 символов длиннее настоящего.
+    if { printf '\033[?2004l  %s: ' "$prompt" > /dev/tty; } 2>/dev/null; then
       IFS= read -r -s value < /dev/tty || true
       printf '\n' > /dev/tty
     fi
   fi
+  # Если обёртка всё же пришла — убираем её, а с ней любые невидимые управляющие символы.
+  value=${value//$'\033[200~'/}; value=${value//$'\033[201~'/}
+  value=$(printf '%s' "$value" | tr -d '[:cntrl:]')
+  # пробелы по краям — частый след копирования из панели
+  value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
   [ -n "$value" ] || die "пустое значение: $prompt"
   printf -v "$var" '%s' "$value"
 }
@@ -274,7 +284,7 @@ EOF
   umask 022
 fi
 chmod 600 "$ORDIUS_ETC/backup.env"
-/usr/local/sbin/ordius-s3-setup || { rm -f "$ORDIUS_ETC/backup.env"; die "нет доступа к бакету. Проверьте адрес, имя бакета и ключи и запустите скрипт ещё раз"; }
+/usr/local/sbin/ordius-s3-setup || { rm -f "$ORDIUS_ETC/backup.env"; die "нет доступа к бакету (причина строкой выше). Запустите скрипт ещё раз — он спросит ключи заново"; }
 
 new_restic_pass=0
 if [ ! -s "$ORDIUS_ETC/restic.pass" ]; then
@@ -339,6 +349,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+if [ "$DRILL" = "1" ]; then
+  # Учения: копии с этого сервера писались бы под тем же именем, что и рабочие, и смешались бы с ними.
+  # Поэтому расписание копий не включаем и в хранилище ничего не пишем — только проверяем восстановленное.
+  say "11/11 Проверка восстановленных данных (учения, копии с этого сервера не делаются)"
+  systemctl disable --now ordius-backup.timer ordius-maintain.timer >/dev/null 2>&1 || true
+  curl -fsS -m 5 http://127.0.0.1:8090/api/health >/dev/null || die "PocketBase не отвечает после восстановления"
+  ok "PocketBase отвечает"
+  [ "$(sqlite3 "$PB_DATA/data.db" 'PRAGMA integrity_check;')" = "ok" ] || die "база повреждена (integrity_check)"
+  ok "база целая (integrity_check: ok)"
+  q() { sqlite3 "$PB_DATA/data.db" "$1" 2>/dev/null || echo "—"; }
+  snap_json=$(r snapshots latest --no-lock --host "$ORDIUS_HOST" --tag "$ORDIUS_TAG" --json 2>/dev/null || true)
+  snap_id=$(jq -r '.[0].short_id // empty' <<<"$snap_json" 2>/dev/null || true)
+  snap_time=$(jq -r '.[0].time // empty' <<<"$snap_json" 2>/dev/null || true)
+  snap_nsk=$(TZ=Asia/Novosibirsk date -d "$snap_time" '+%d.%m.%Y %H:%M' 2>/dev/null || echo "$snap_time")
+  snap="${snap_id:-—}, снята ${snap_nsk:-—} по Новосибирску"
+  echo
+  echo "════════════════════════════════════════════════════════════════════"
+  echo " Учения прошли: данные восстановлены из копии и сервис работает"
+  echo "════════════════════════════════════════════════════════════════════"
+  echo "  копия:                 $snap"
+  echo "  таблиц (коллекций):    $(q 'SELECT count(*) FROM _collections;')"
+  echo "  применённых миграций:  $(q 'SELECT count(*) FROM _migrations;')"
+  echo "  администраторов:       $(q 'SELECT count(*) FROM _superusers;')"
+  echo "  пользователей:         $(q 'SELECT count(*) FROM users;')"
+  echo "  файлы:                 $(du -sh "$PB_DATA/storage" 2>/dev/null | cut -f1)"
+  echo
+  echo "  На этом сервере — копия рабочих данных. Удалите его в панели сразу после проверки."
+  echo
+  exit 0
+fi
+
 say "11/11 Первая копия и расписание"
 systemctl enable --now ordius-backup.timer ordius-maintain.timer >/dev/null 2>&1
 ordius-backup
