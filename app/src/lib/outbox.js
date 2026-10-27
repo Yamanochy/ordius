@@ -88,6 +88,8 @@ let started = false;
 export function startOutbox() {
   if (started) return;
   started = true;
+  // попросить браузер не очищать данные приложения при нехватке места (iOS 17+, Android) — в них неотправленное
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (_) { /* нет */ }
   emit().then(() => flush());
   window.addEventListener('online', () => flush());
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flush(); });

@@ -6,7 +6,7 @@ import { subscribe, flush, removeItem } from '../lib/outbox.js';
 import { Link } from '../lib/router.jsx';
 import { ROLES, prettyPhone, dayLabel, timeOf } from '../lib/format.js';
 import { Button, Field, Icon, PageTitle, ErrorBox, Badge, Select, Sheet, useToast } from '../ui.jsx';
-import { PhoneCheck } from './Auth.jsx';
+import { PhoneCheck, clearPending } from './Auth.jsx';
 
 function Item({ to, icon, title, sub }) {
   return (
@@ -137,6 +137,7 @@ export function Profile() {
           <PhoneCheck purpose="change" submitLabel="Подтвердить новый номер" onTicket={async (ticket) => {
             try {
               await pb.send('/api/ordius/phone/change', { method: 'POST', body: { ticket } });
+              clearPending();
               await pb.collection('users').authRefresh();
               toast('Номер изменён'); setPhoneSheet(false);
             } catch (e) { setErr(errText(e)); setPhoneSheet(false); }
