@@ -16,6 +16,7 @@ import { People, Person } from './screens/People.jsx';
 import { Payroll, Payouts } from './screens/Payroll.jsx';
 import { Vehicles, Sites, Rates } from './screens/Directory.jsx';
 import { Maintenance } from './screens/Fleet.jsx';
+import { ConnectCodes } from './screens/Admin.jsx';
 
 function navFor(s) {
   if (s.isOffice) {
@@ -35,6 +36,7 @@ const ROUTES = [
   ['/more', More], ['/profile', Profile], ['/outbox', Outbox], ['/company', CompanySettings], ['/join', () => <Welcome embedded />],
   ['/people', People], ['/people/:id', Person], ['/payroll', Payroll], ['/payouts', Payouts],
   ['/vehicles', Vehicles], ['/sites', Sites], ['/rates', Rates], ['/maintenance', Maintenance],
+  ['/connect-codes', ConnectCodes],
 ];
 const WIDE = ['/payroll', '/shifts', '/people', '/rates', '/payouts', '/vehicles', '/sites', '/maintenance', '/fuel'];
 
