@@ -7,6 +7,7 @@ import { Link } from '../lib/router.jsx';
 import { ROLES, prettyPhone, dayLabel, timeOf } from '../lib/format.js';
 import { Button, Field, Icon, PageTitle, ErrorBox, Badge, Select, Sheet, useToast } from '../ui.jsx';
 import { PhoneCheck, clearPending } from './Auth.jsx';
+import { useMe } from './Admin.jsx';
 
 function Item({ to, icon, title, sub }) {
   return (
@@ -20,6 +21,7 @@ function Item({ to, icon, title, sub }) {
 
 export function More() {
   const s = useSession();
+  const me = useMe();
   const office = s.isOffice;
   return (
     <div className="stack-lg">
@@ -57,6 +59,14 @@ export function More() {
         <Item to="/outbox" icon="upload" title="Неотправленное" />
         <Item to="/join" icon="building" title="Вступить в другую компанию" />
       </div>
+      {me.admin && (
+        <>
+          <span className="section-label">Администратор Ordius</span>
+          <div className="list">
+            <Item to="/connect-codes" icon="list" title="Коды подключения" sub="Кто может создать компанию на пилоте" />
+          </div>
+        </>
+      )}
       <p className="note" style={{ textAlign: 'center' }}>Ordius · вопросы — ordius.info@yandex.ru</p>
     </div>
   );

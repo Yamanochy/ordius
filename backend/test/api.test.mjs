@@ -68,7 +68,8 @@ const dir = mkdtempSync(join(tmpdir(), "ordius-pb-"));
 const port = await freePort();
 const BASE = `http://127.0.0.1:${port}`;
 const env = { ...process.env, PB_ENCRYPTION_KEY: "abcdefghijklmnopqrstuvwxyz012345",
-  SMSRU_API_ID: SMSRU_KEY, ORDIUS_SMSRU_BASE: MOCK, ORDIUS_PHONE_IP_HOURLY: "1000" };
+  SMSRU_API_ID: SMSRU_KEY, ORDIUS_SMSRU_BASE: MOCK, ORDIUS_PHONE_IP_HOURLY: "1000",
+  ORDIUS_ADMIN_PHONES: "8 923 000-00-01" };  // Иван Петров (A) — администратор Ordius
 const args = [`--dir=${dir}/pb_data`, `--migrationsDir=${ROOT}/pb_migrations`, `--hooksDir=${ROOT}/pb_hooks`, "--encryptionEnv=PB_ENCRYPTION_KEY"];
 execFileSync(PB, ["superuser", "upsert", "admin@test.local", "Adm1nPassw0rd!", ...args], { env, stdio: "ignore" });
 const srv = spawn(PB, ["serve", `--http=127.0.0.1:${port}`, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -111,7 +112,7 @@ const settings = (await api("GET", "/api/settings", { token: su })).json;
 const labels = settings.rateLimits.rules.map((r) => r.label);
 check("ограничения частоты: стандартные правила на месте и добавлены коды и звонки",
   settings.rateLimits.enabled && ["*:auth", "POST /api/ordius/join", "POST /api/ordius/password-reset", "POST /api/ordius/phone/start",
-    "POST /api/ordius/phone/verify", "POST /api/ordius/phone/status", "POST /api/ordius/signup", "POST /api/ordius/lead"]
+    "POST /api/ordius/phone/verify", "POST /api/ordius/phone/status", "POST /api/ordius/signup", "POST /api/ordius/lead", "companies:create"]
     .every((l) => labels.includes(l)), labels);
 check("в журнале запросов нет IP, хранится 14 дней", settings.logs.logIP === false && settings.logs.maxDays === 14, settings.logs);
 await api("PATCH", "/api/settings", { token: su, body: { rateLimits: { enabled: false } } });
@@ -249,7 +250,26 @@ const freePlan = await create("companies", A.token, { terms: TERMS, name: "Y", p
 check("тариф клиент себе не выставляет", freePlan.status === 400, freePlan.json);
 check("тариф не поменять правкой", (await update("companies", companyA, A.token, { plan: "business" })).status === 400);
 check("владелец переименовывает компанию", is2xx(await update("companies", companyA, A.token, { name: "ООО «Ромашка-Сервис»" })));
-const cB = await create("companies", B.token, { terms: TERMS, name: "ИП Лютиков" });
+// коды подключения: на пилоте компанию создаёт только тот, кому администратор выдал код
+const meA = (await api("GET", "/api/ordius/me", { token: A.token })).json;
+const meB = (await api("GET", "/api/ordius/me", { token: B.token })).json;
+check("администратор Ordius — по номеру из настроек сервера, код ему не нужен",
+  meA.platform_admin === true && meA.company_code_required === false && meB.platform_admin === false && meB.company_code_required === true, { meA, meB });
+const noCode = await create("companies", B.token, { terms: TERMS, name: "ИП Лютиков" });
+check("без кода подключения компанию не создать", noCode.status === 400 && /код подключения/.test(noCode.text), noCode.json);
+check("с выдуманным кодом — тоже", (await create("companies", B.token, { terms: TERMS, name: "ИП Лютиков", connect_key: "ZZZZZZZZ" })).status === 400);
+check("коды видит только администратор", (await api("GET", "/api/ordius/connect-codes", { token: B.token })).status === 403);
+check("выдаёт коды только администратор",
+  (await api("POST", "/api/ordius/connect-codes", { token: B.token, body: { note: "сам себе" } })).status === 403);
+check("без пометки «кому» код не выдаётся", (await api("POST", "/api/ordius/connect-codes", { token: A.token, body: { note: "" } })).status === 400);
+const code1 = (await api("POST", "/api/ordius/connect-codes", { token: A.token, body: { note: "ИП Лютиков", max_uses: 5 } })).json;
+check("администратор выдал код на 5 компаний", /^[A-Z2-9]{8}$/.test(code1.code || "") && code1.max_uses === 5 && code1.used === 0 && !!code1.expires, code1);
+const cB = await create("companies", B.token, { terms: TERMS, name: "ИП Лютиков", connect_key: " " + code1.code.toLowerCase().slice(0, 4) + "-" + code1.code.slice(4) + " " });
+check("с кодом (в любом написании) компания создаётся и помнит код", is2xx(cB) && cB.json.connect_code === code1.id, cB.json);
+check("код подключения у компании не подменить", (await update("companies", cB.json.id, B.token, { connect_code: "" })).status === 400);
+const codesAfter = (await api("GET", "/api/ordius/connect-codes", { token: A.token })).json.items;
+check("в списке кодов видно, кто подключился", codesAfter.some((c) => c.id === code1.id && c.used === 1 &&
+  c.companies.length === 1 && c.companies[0].name === "ИП Лютиков"), codesAfter);
 const companyB = cB.json.id;
 
 const myA = await list("memberships", A.token, `company = "${companyA}"`);
@@ -874,9 +894,18 @@ const deadMail = await postLead({ name: "Без почты" });
 check("почта не работает — заявка всё равно сохраняется", deadMail.status === 200 && (await leadsNow()).some((l) => l.ref === deadMail.json.ref));
 
 // ---------- защита от засорения ----------
-for (let i = 0; i < 4; i++) await create("companies", B.token, { terms: TERMS, name: "Б-" + i });
-const sixth = await create("companies", B.token, { terms: TERMS, name: "Б-лишняя" });
+for (let i = 0; i < 4; i++) await create("companies", B.token, { terms: TERMS, name: "Б-" + i, connect_key: code1.code });
+const spent = await create("companies", B.token, { terms: TERMS, name: "Б-лишняя", connect_key: code1.code });
+check("код на 5 компаний после пятой не действует", spent.status === 400 && /код подключения/.test(spent.text), spent.json);
+const code2 = (await api("POST", "/api/ordius/connect-codes", { token: A.token, body: { note: "Лютиков, ещё одна", days: 7 } })).json;
+const sixth = await create("companies", B.token, { terms: TERMS, name: "Б-лишняя", connect_key: code2.code });
 check("не больше 5 компаний на человека", sixth.status === 400 && /5 компаний/.test(sixth.text), sixth.json);
+const code2now = (await api("GET", "/api/ordius/connect-codes", { token: A.token })).json.items.find((c) => c.id === code2.id);
+check("неудачная попытка код не тратит", code2now && code2now.used === 0, code2now);
+const revoked = await api("POST", `/api/ordius/connect-codes/${code2.id}/revoke`, { token: A.token });
+check("администратор отзывает код", is2xx(revoked) && revoked.json.expires, revoked.json);
+const egorCo = await create("companies", egor.token, { terms: TERMS, name: "Егор и Ко", connect_key: code2.code });
+check("отозванный код не действует", egorCo.status === 400 && /код подключения/.test(egorCo.text), egorCo.json);
 
 // ---------- сервер без ключа SMS.ru и с неверным ключом ----------
 // Поднимаем ещё два PocketBase: без ключа и с ключом, который «SMS.ru» не принимает.

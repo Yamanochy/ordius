@@ -48,7 +48,7 @@ await new Promise((r) => mock.listen(mockPort, '127.0.0.1', r));
 const dir = mkdtempSync(join(tmpdir(), 'ordius-e2e-'));
 const port = await freePort();
 const BASE = `http://127.0.0.1:${port}`;
-const env = { ...process.env, PB_ENCRYPTION_KEY: 'abcdefghijklmnopqrstuvwxyz012345', SMSRU_API_ID: 'K', ORDIUS_SMSRU_BASE: `http://127.0.0.1:${mockPort}`, ORDIUS_PHONE_IP_HOURLY: '1000' };
+const env = { ...process.env, PB_ENCRYPTION_KEY: 'abcdefghijklmnopqrstuvwxyz012345', SMSRU_API_ID: 'K', ORDIUS_SMSRU_BASE: `http://127.0.0.1:${mockPort}`, ORDIUS_PHONE_IP_HOURLY: '1000', ORDIUS_ADMIN_PHONES: '+79230000001' };
 const args = [`--dir=${dir}/pb_data`, `--migrationsDir=${ROOT}/backend/pb_migrations`, `--hooksDir=${ROOT}/backend/pb_hooks`, `--publicDir=${ROOT}/app/dist`, '--encryptionEnv=PB_ENCRYPTION_KEY'];
 execFileSync(PB, ['superuser', 'upsert', 'admin@test.local', 'Adm1nPassw0rd!', ...args], { env, stdio: 'ignore' });
 const srv = spawn(PB, ['serve', `--http=127.0.0.1:${port}`, ...args], { env, stdio: 'ignore' });
@@ -215,6 +215,35 @@ await d.getByRole('button', { name: 'Записать' }).click();
 await d.getByText('Заработано в').waitFor();
 const fuel = await api('GET', '/api/collections/fuel_logs/records', su);
 check('заправка водителя записана', fuel.items.length === 1 && fuel.items[0].liters === 120 && fuel.items[0].amount_kop === 840000, fuel.items);
+
+// ---------- администратор Ordius выдаёт код, новый руководитель создаёт компанию ----------
+await a.goto(BASE + '/#/more');
+await a.getByRole('link', { name: /Коды подключения/ }).click();
+await a.getByRole('heading', { name: 'Коды подключения' }).waitFor();
+await a.getByRole('button', { name: 'Новый код' }).click();
+await a.getByLabel('Кому').fill('ООО «Новый клиент»');
+await a.getByRole('button', { name: 'Выдать код' }).click();
+await a.getByRole('button', { name: 'Скопировать сообщение' }).waitFor();
+await shot(a, '17-connect-code');
+const newCode = (await api('GET', '/api/ordius/connect-codes', A)).items[0].code;
+check('администратор выдал код подключения в приложении', /^[A-Z2-9]{8}$/.test(newCode), newCode);
+await api('POST', '/api/collections/users/records', su, { name: 'Ольга Новикова', phone: '+79230000009', password: PASS, passwordConfirm: PASS });
+const nctx = await browser.newContext({ ...iphone, locale: 'ru-RU', timezoneId: 'Asia/Novosibirsk' });
+const n = await nctx.newPage();
+await n.goto(BASE + '/');
+await n.getByLabel('Номер мобильного').fill('89230000009');
+await n.getByLabel('Пароль').fill(PASS);
+await n.getByRole('button', { name: 'Войти', exact: true }).click();
+await n.getByRole('button', { name: /Я руководитель/ }).click();
+await n.getByLabel('Название').fill('ООО «Новый клиент»');
+await n.getByLabel('Код подключения').fill(newCode.toLowerCase());
+await n.getByRole('checkbox').check();
+await shot(n, '18-new-company');
+await n.getByRole('button', { name: 'Создать', exact: true }).click();
+await n.getByRole('heading', { name: 'Сводка' }).waitFor();
+const newCo = (await api('GET', `/api/collections/companies/records?filter=${encodeURIComponent('name="ООО «Новый клиент»"')}`, su)).items;
+check('новый руководитель создал компанию по коду и принял условия', newCo.length === 1 && newCo[0].terms_version === TERMS_VERSION && !!newCo[0].connect_code, newCo);
+await nctx.close();
 
 // тёмная тема, широкий экран офиса
 const wctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: 'dark', locale: 'ru-RU' });

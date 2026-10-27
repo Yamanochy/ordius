@@ -5,6 +5,7 @@ import { useSession } from '../lib/session.jsx';
 import { useQuery } from '../lib/data.js';
 import { ROLES } from '../lib/format.js';
 import { TERMS_VERSION, TERMS_URL } from '../lib/legal.js';
+import { useMe } from './Admin.jsx';
 import { Logo, Button, Field, Icon, ErrorBox, Badge, useToast } from '../ui.jsx';
 
 export default function Welcome({ embedded }) {
@@ -18,6 +19,8 @@ export default function Welcome({ embedded }) {
   const [coName, setCoName] = useState('');
   const [coInn, setCoInn] = useState('');
   const [coTerms, setCoTerms] = useState(false);
+  const [coKey, setCoKey] = useState('');
+  const me = useMe();
   const pending = s.memberships.filter((m) => m.status === 'pending');
 
   async function accept(id) {
@@ -43,10 +46,11 @@ export default function Welcome({ embedded }) {
   async function createCompany(e) {
     e.preventDefault();
     if (coName.trim().length < 2) { setErr('Укажите название компании'); return; }
+    if (me.codeRequired && coKey.replace(/[\s-]/g, '').length < 6) { setErr('Впишите код подключения от Ordius'); return; }
     if (!coTerms) { setErr('Нужно принять условия для компании'); return; }
     setBusy('co'); setErr('');
     try {
-      const c = await pb.collection('companies').create({ name: coName.trim(), inn: coInn.trim() || undefined, terms: TERMS_VERSION });
+      const c = await pb.collection('companies').create({ name: coName.trim(), inn: coInn.trim() || undefined, terms: TERMS_VERSION, connect_key: me.codeRequired ? coKey.trim() : undefined });
       await s.reload();
       s.setCompany(c.id);
       toast('Компания создана. Вы — владелец');
@@ -91,6 +95,11 @@ export default function Welcome({ embedded }) {
           <h2 className="h2">Новая компания</h2>
           <Field label="Название"><input value={coName} onChange={(e) => setCoName(e.target.value)} placeholder="ИП Иванов И.И." /></Field>
           <Field label="ИНН" hint="Необязательно"><input inputMode="numeric" value={coInn} onChange={(e) => setCoInn(e.target.value.replace(/\D/g, ''))} maxLength={12} /></Field>
+          {me.codeRequired && (
+            <Field label="Код подключения" hint="Выдаёт Ordius. Нет кода — напишите нам: ordius.info@yandex.ru или Telegram @Ordius_app">
+              <input autoCapitalize="characters" autoComplete="off" value={coKey} onChange={(e) => setCoKey(e.target.value.toUpperCase())} placeholder="Например, K7M2X9QD" />
+            </Field>
+          )}
           <label className="check small">
             <input type="checkbox" checked={coTerms} onChange={(e) => setCoTerms(e.target.checked)} />
             <span>Принимаю <a href={TERMS_URL} target="_blank" rel="noreferrer">условия использования</a> от имени компании, в том числе поручение Ordius обрабатывать данные её работников (раздел 5)</span>

@@ -75,6 +75,18 @@ read -rsp "Ключ SMS.ru (api_id): " K && echo && sed -i '/^SMSRU_API_ID=/d' /
 
 Без ключа регистрация отвечает «Подтверждение номера ещё не настроено» — остальное работает.
 
+Администратор Ordius — номер, которому приложение показывает «Ещё → Коды подключения» и который создаёт компании
+без кода (на пилоте остальным нужен код от администратора). Записать один раз (несколько номеров — через запятую):
+
+```bash
+read -rp "Номер администратора Ordius (+79…): " P && sed -i '/^ORDIUS_ADMIN_PHONES=/d' /etc/ordius/pocketbase.env \
+  && printf 'ORDIUS_ADMIN_PHONES=%s\n' "$P" >> /etc/ordius/pocketbase.env && unset P \
+  && systemctl restart ordius-pocketbase && echo "Записано, сервис перезапущен"
+```
+
+Открыть самостоятельное подключение компаний без кода (после пилота): строка `ORDIUS_OPEN_COMPANIES=1` в том же файле
+и `systemctl restart ordius-pocketbase`.
+
 ## Каждый день
 
 Ничего делать не нужно. Проверить состояние:

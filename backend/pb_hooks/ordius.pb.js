@@ -359,10 +359,10 @@ cronAdd("ordius_phone_checks_cleanup", "17 21 * * *", () => {
 
 // ---------- компании: создатель становится владельцем ----------
 onRecordCreateRequest((e) => {
-  const { code, rejectServerFields, audit, nowIso } = require(`${__hooks}/lib/util.js`);
+  const { code, rejectServerFields, audit, nowIso, normalizePhone } = require(`${__hooks}/lib/util.js`);
   const legal = require(`${__hooks}/lib/legal.js`);
   // тариф меняет только администратор сервера (после оплаты), не клиент
-  rejectServerFields(e, ["join_code", "created_by", "plan", "terms_version", "terms_at"]);
+  rejectServerFields(e, ["join_code", "created_by", "plan", "terms_version", "terms_at", "connect_code"]);
   if (!e.record.get("plan")) e.record.set("plan", "pilot");
   e.record.set("join_code", code(8));
   if (e.hasSuperuserAuth()) return e.next();
@@ -371,12 +371,26 @@ onRecordCreateRequest((e) => {
   if (String((e.requestInfo().body || {}).terms || "") !== legal.TERMS_VERSION) {
     throw new BadRequestError("Примите условия использования для компании. Если галочка уже стоит — обновите страницу");
   }
+  // На пилоте компанию создаёт тот, кому администратор Ordius выдал код подключения (lib/admin.js).
+  const adm = require(`${__hooks}/lib/admin.js`);
+  let connect = null;
+  if (adm.codesRequired() && !adm.isAdmin(e.auth, normalizePhone)) {
+    connect = adm.activeCode(e.app, (e.requestInfo().body || {}).connect_key, nowIso());
+    if (!connect) {
+      throw new BadRequestError("Нужен код подключения от Ordius. Напишите нам: ordius.info@yandex.ru или Telegram @Ordius_app");
+    }
+  }
   const mine = e.app.countRecords("companies", $dbx.hashExp({ created_by: e.auth.id }));
   if (mine >= 5) throw new BadRequestError("Создано уже 5 компаний. Если нужно больше — напишите в поддержку");
   e.record.set("created_by", e.auth.id);
   e.record.set("terms_version", legal.TERMS_VERSION);
   e.record.set("terms_at", nowIso());
+  if (connect) e.record.set("connect_code", connect.id);
   e.next();
+  if (connect) {
+    connect.set("used", connect.getInt("used") + 1);
+    e.app.save(connect);
+  }
 
   const m = new Record(e.app.findCollectionByNameOrId("memberships"));
   m.set("company", e.record.id);
@@ -396,7 +410,7 @@ onRecordCreateRequest((e) => {
 
 onRecordUpdateRequest((e) => {
   const { rejectServerFields, audit } = require(`${__hooks}/lib/util.js`);
-  rejectServerFields(e, ["join_code", "created_by", "plan", "terms_version", "terms_at"]);
+  rejectServerFields(e, ["join_code", "created_by", "plan", "terms_version", "terms_at", "connect_code"]);
   e.next();
   audit(e.app, "update", e.record, e.auth);
 }, "companies");
