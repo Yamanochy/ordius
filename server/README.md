@@ -142,8 +142,9 @@ ordius-restore 1a2b3c4d      # восстановить нужную; или: or
 ordius-deploy
 ```
 
-Делает копию, берёт ветку `main` из GitHub, раскладывает `backend/pb_migrations`, `backend/pb_hooks`,
-`app/dist` и перезапускает PocketBase. Миграции базы применяются при запуске. Если сервис не поднялся —
+Делает копию, берёт ветку `main` из GitHub, обновляет скрипты сервера (`server/bin`, `server/lib` —
+только если в них нет ошибок синтаксиса), раскладывает `backend/pb_migrations`, `backend/pb_hooks`,
+`app/dist`, проверяет, что папка фото принадлежит PocketBase, и перезапускает PocketBase. Миграции базы применяются при запуске. Если сервис не поднялся —
 скрипт скажет, что делать.
 
 ## Обновление PocketBase

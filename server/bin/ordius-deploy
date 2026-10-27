@@ -24,6 +24,33 @@ git -C "$REPO" reset --quiet --hard "origin/$BRANCH"
 after=$(git -C "$REPO" rev-parse HEAD)
 log "репозиторий: ${before:0:7} → ${after:0:7}"
 
+# Скрипты сервера (копии, восстановление, выкладка, состояние) — из того же репозитория, чтобы их
+# исправления приезжали с обычной выкладкой. Службы systemd и Caddy по-прежнему меняет только setup.sh.
+# Битый скрипт не ставим: сначала проверка синтаксиса, при ошибке остаются прежние.
+SBIN=${ORDIUS_SBIN:-/usr/local/sbin}
+LIBDIR=${ORDIUS_LIB:-/usr/local/lib/ordius}
+scripts_ok() {
+  local f
+  bash -n "$REPO/server/lib/common.sh" || return 1
+  for f in "$REPO"/server/bin/ordius-*; do
+    case "$(head -1 "$f")" in
+      *python*) python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$f" || return 1 ;;
+      *) bash -n "$f" || return 1 ;;
+    esac
+  done
+}
+if [ -d "$REPO/server/bin" ] && [ -s "$REPO/server/lib/common.sh" ]; then
+  if scripts_ok; then
+    [ "$REPO/server/lib/common.sh" -ef "$LIBDIR/common.sh" ] || install -m 644 "$REPO/server/lib/common.sh" "$LIBDIR/common.sh"
+    for f in "$REPO"/server/bin/ordius-*; do install -m 755 "$f" "$SBIN/$(basename "$f")"; done
+    # shellcheck source=../lib/common.sh
+    source "$LIBDIR/common.sh"
+    log "скрипты сервера обновлены"
+  else
+    warn "в скриптах сервера ошибка — оставляю прежние"
+  fi
+fi
+
 if [ "$restart" = "1" ] && [ -r "$ORDIUS_ETC/backup.env" ]; then
   log "копия перед выкладкой"
   ordius-backup || die "копия перед выкладкой не удалась — выкладка отменена"

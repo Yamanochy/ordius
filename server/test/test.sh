@@ -146,6 +146,12 @@ git clone -q "$src" "$ORDIUS_OPT/repo"
 check "deploy: файлы разложены" "ordius-deploy --no-restart >/dev/null 2>&1 && [ -s '$ORDIUS_OPT/pb_migrations/1_init.js' ] && [ -s '$ORDIUS_OPT/pb_hooks/main.pb.js' ] && grep -q ORDIUS '$ORDIUS_OPT/pb_public/index.html'"
 mkdir -p "$ORDIUS_DATA/pb_data/storage/root-made" && chown root:root "$ORDIUS_DATA/pb_data/storage" "$ORDIUS_DATA/pb_data/storage/root-made"
 check "deploy: папку фото, созданную root, возвращает PocketBase" "ordius-deploy --no-restart >/dev/null 2>&1 && [ \"\$(stat -c %U '$ORDIUS_DATA/pb_data/storage/root-made')\" = nobody ] && [ \"\$(stat -c %U '$ORDIUS_DATA/pb_data/storage')\" = nobody ]"
+mkdir -p "$src/server/bin" "$src/server/lib" "$T/sbin" && cp "$HERE"/bin/ordius-* "$src/server/bin/" && cp "$HERE/lib/common.sh" "$src/server/lib/"
+git -C "$src" -c user.name=t -c user.email=t@t add -A && git -C "$src" -c user.name=t -c user.email=t@t commit -qm scripts
+check "deploy: ставит скрипты сервера из репозитория" "ORDIUS_SBIN='$T/sbin' ordius-deploy --no-restart >/dev/null 2>&1 && [ -x '$T/sbin/ordius-backup' ] && [ -x '$T/sbin/ordius-s3-setup' ] && [ -x '$T/sbin/ordius-deploy' ]"
+echo 'if then fi' >> "$src/server/bin/ordius-status" && git -C "$src" -c user.name=t -c user.email=t@t commit -qam broken
+cp "$T/sbin/ordius-status" "$T/status.before"
+check "deploy: битый скрипт не ставит, прежние остаются" "ORDIUS_SBIN='$T/sbin' ordius-deploy --no-restart >/dev/null 2>&1 && cmp -s '$T/sbin/ordius-status' '$T/status.before'"
 git -C "$src" rm -q backend/pb_hooks/main.pb.js && git -C "$src" -c user.name=t -c user.email=t@t commit -qm rm
 check "deploy: удалённый хук исчезает, миграции остаются" "ordius-deploy --no-restart >/dev/null 2>&1 && [ ! -e '$ORDIUS_OPT/pb_hooks/main.pb.js' ] && [ -s '$ORDIUS_OPT/pb_migrations/1_init.js' ]"
 
