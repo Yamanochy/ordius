@@ -51,6 +51,7 @@ PY
 for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null && break; sleep 0.2; done
 
 export ORDIUS_ETC="$T/etc" ORDIUS_DATA="$T/data" ORDIUS_OPT="$T/opt" ORDIUS_LIB="$HERE/lib" ORDIUS_NO_SYSTEMD=1
+export ORDIUS_PB_USER=nobody   # «пользователь PocketBase» в проверке
 export PATH="$HERE/bin:$PATH"
 export AWS_EC2_METADATA_DISABLED=true
 mkdir -p "$ORDIUS_ETC" "$ORDIUS_DATA/pb_data/storage/abc123" "$ORDIUS_OPT"
@@ -104,6 +105,7 @@ check "restic: хранилище создаётся" "r init >/dev/null 2>&1"
 
 # --- 4. копии ----------------------------------------------------------------
 check "backup: первая копия" "ordius-backup >/dev/null 2>&1"
+check "backup: папка фото принадлежит PocketBase, а не root" "[ \"\$(stat -c %U '$ORDIUS_DATA/pb_data/storage')\" = nobody ] && [ \"\$(stat -c %U '$ORDIUS_DATA/pb_data/storage/abc123/photo1.jpg')\" = nobody ]"
 check "backup: отметка last-ok" "[ -s '$ORDIUS_DATA/backup/last-ok' ]"
 check "backup: оповещение об успехе" "grep -qx '/hc' '$T/pings'"
 
@@ -142,6 +144,14 @@ echo '// hook' > "$src/backend/pb_hooks/main.pb.js"
 git -C "$src" init -q -b main && git -C "$src" -c user.name=t -c user.email=t@t add -A && git -C "$src" -c user.name=t -c user.email=t@t commit -qm init
 git clone -q "$src" "$ORDIUS_OPT/repo"
 check "deploy: файлы разложены" "ordius-deploy --no-restart >/dev/null 2>&1 && [ -s '$ORDIUS_OPT/pb_migrations/1_init.js' ] && [ -s '$ORDIUS_OPT/pb_hooks/main.pb.js' ] && grep -q ORDIUS '$ORDIUS_OPT/pb_public/index.html'"
+mkdir -p "$ORDIUS_DATA/pb_data/storage/root-made" && chown root:root "$ORDIUS_DATA/pb_data/storage" "$ORDIUS_DATA/pb_data/storage/root-made"
+check "deploy: папку фото, созданную root, возвращает PocketBase" "ordius-deploy --no-restart >/dev/null 2>&1 && [ \"\$(stat -c %U '$ORDIUS_DATA/pb_data/storage/root-made')\" = nobody ] && [ \"\$(stat -c %U '$ORDIUS_DATA/pb_data/storage')\" = nobody ]"
+mkdir -p "$src/server/bin" "$src/server/lib" "$T/sbin" && cp "$HERE"/bin/ordius-* "$src/server/bin/" && cp "$HERE/lib/common.sh" "$src/server/lib/"
+git -C "$src" -c user.name=t -c user.email=t@t add -A && git -C "$src" -c user.name=t -c user.email=t@t commit -qm scripts
+check "deploy: ставит скрипты сервера из репозитория" "ORDIUS_SBIN='$T/sbin' ordius-deploy --no-restart >/dev/null 2>&1 && [ -x '$T/sbin/ordius-backup' ] && [ -x '$T/sbin/ordius-s3-setup' ] && [ -x '$T/sbin/ordius-deploy' ]"
+echo 'if then fi' >> "$src/server/bin/ordius-status" && git -C "$src" -c user.name=t -c user.email=t@t commit -qam broken
+cp "$T/sbin/ordius-status" "$T/status.before"
+check "deploy: битый скрипт не ставит, прежние остаются" "ORDIUS_SBIN='$T/sbin' ordius-deploy --no-restart >/dev/null 2>&1 && cmp -s '$T/sbin/ordius-status' '$T/status.before'"
 git -C "$src" rm -q backend/pb_hooks/main.pb.js && git -C "$src" -c user.name=t -c user.email=t@t commit -qm rm
 check "deploy: удалённый хук исчезает, миграции остаются" "ordius-deploy --no-restart >/dev/null 2>&1 && [ ! -e '$ORDIUS_OPT/pb_hooks/main.pb.js' ] && [ -s '$ORDIUS_OPT/pb_migrations/1_init.js' ]"
 

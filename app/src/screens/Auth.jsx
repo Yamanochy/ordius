@@ -8,6 +8,24 @@ import { Logo, Button, Field, Icon, ErrorBox } from '../ui.jsx';
 
 const start = (phone, purpose, method) => pb.send('/api/ordius/phone/start', { method: 'POST', body: { phone, purpose, method } });
 
+// Проверка номера переживает перезапуск приложения: на iPhone, пока человек звонит, iOS может выгрузить
+// Safari или приложение с экрана «Домой», и после возврата экран начался бы заново. Поэтому начатая
+// проверка (а после звонка — билет) хранится на телефоне 15 минут и подхватывается при следующем открытии.
+const PENDING = 'ordius-phone-pending';
+function savePending(x) {
+  try { localStorage.setItem(PENDING, JSON.stringify({ ...x, at: Date.now() })); } catch (_) { /* нет места */ }
+}
+export function readPending(purpose) {
+  try {
+    const x = JSON.parse(localStorage.getItem(PENDING) || 'null');
+    if (!x || (purpose && x.purpose !== purpose) || Date.now() - x.at > 15 * 60e3) return null;
+    return x;
+  } catch (_) { return null; }
+}
+export function clearPending() {
+  try { localStorage.removeItem(PENDING); } catch (_) { /* нет */ }
+}
+
 function AuthFrame({ title, text, children }) {
   return (
     <div className="auth">
@@ -25,15 +43,47 @@ function AuthFrame({ title, text, children }) {
 
 // Подтверждение номера звонком → билет на 15 минут.
 export function PhoneCheck({ purpose, onTicket, initialPhone = '', submitLabel = 'Продолжить' }) {
-  const [phone, setPhone] = useState(initialPhone);
-  const [step, setStep] = useState('phone'); // phone | call | code
-  const [check, setCheck] = useState(null);
+  const saved = useRef(readPending(purpose));
+  const [phone, setPhone] = useState((saved.current && saved.current.check && saved.current.check.phone) || initialPhone);
+  const [step, setStep] = useState(() => (saved.current && (saved.current.stage === 'call' || saved.current.stage === 'code') ? saved.current.stage : 'phone')); // phone | call | code
+  const [check, setCheck] = useState(() => (saved.current && saved.current.check) || null);
   const [code, setCode] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const timer = useRef(null);
+  const tickRef = useRef(null);
 
-  useEffect(() => () => clearInterval(timer.current), []);
+  function done(ticket, p) {
+    clearInterval(timer.current);
+    tickRef.current = null;
+    savePending({ purpose, stage: 'verified', ticket, phone: p });
+    onTicket(ticket, p);
+  }
+
+  function poll(r, p) {
+    clearInterval(timer.current);
+    const tick = async () => {
+      try {
+        const st = await pb.send('/api/ordius/phone/status', { method: 'POST', body: { check: r.check } });
+        if (st.status === 'verified') done(r.ticket, p);
+        else if (st.status === 'expired') { clearInterval(timer.current); clearPending(); setStep('phone'); setErr('Время вышло — запросите проверку ещё раз'); }
+      } catch (_) { /* связь мигнула — спросим ещё раз */ }
+    };
+    timer.current = setInterval(tick, 2500);
+    tickRef.current = tick;
+    return tick;
+  }
+
+  // вернулись в приложение после звонка — продолжить с того же места
+  useEffect(() => {
+    const x = saved.current;
+    if (x && x.stage === 'verified') onTicket(x.ticket, x.phone);
+    else if (x && x.stage === 'call' && x.check) poll(x.check, x.check.phone)();
+    // вернулись после звонка — спросить сразу, не дожидаясь очередного опроса
+    const onShow = () => { if (document.visibilityState === 'visible' && tickRef.current) tickRef.current(); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => { clearInterval(timer.current); document.removeEventListener('visibilitychange', onShow); };
+  }, []); // eslint-disable-line
 
   async function begin(method) {
     const p = normalizePhone(phone);
@@ -42,17 +92,12 @@ export function PhoneCheck({ purpose, onTicket, initialPhone = '', submitLabel =
     setErr(''); setBusy(true);
     try {
       const r = await start(p, purpose, method);
-      setCheck({ ...r, phone: p });
+      const c = { ...r, phone: p };
+      setCheck(c);
+      savePending({ purpose, stage: r.method === 'call' ? 'code' : 'call', check: c });
       if (r.method === 'call') { setStep('code'); return; }
       setStep('call');
-      clearInterval(timer.current);
-      timer.current = setInterval(async () => {
-        try {
-          const s = await pb.send('/api/ordius/phone/status', { method: 'POST', body: { check: r.check } });
-          if (s.status === 'verified') { clearInterval(timer.current); onTicket(r.ticket, p); }
-          else if (s.status === 'expired') { clearInterval(timer.current); setStep('phone'); setErr('Время вышло — запросите проверку ещё раз'); }
-        } catch (_) { /* связь мигнула — спросим ещё раз */ }
-      }, 2500);
+      poll(r, p);
     } catch (e) {
       setErr(errText(e));
     } finally {
@@ -65,7 +110,7 @@ export function PhoneCheck({ purpose, onTicket, initialPhone = '', submitLabel =
     setBusy(true); setErr('');
     try {
       const r = await pb.send('/api/ordius/phone/verify', { method: 'POST', body: { check: check.check, code } });
-      onTicket(r.ticket, check.phone);
+      done(r.ticket, check.phone);
     } catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
   }
 
@@ -82,7 +127,7 @@ export function PhoneCheck({ purpose, onTicket, initialPhone = '', submitLabel =
         <div className="row muted small" style={{ justifyContent: 'center' }}><span className="spinner" aria-hidden="true" />Ждём ваш звонок…</div>
         <ErrorBox text={err} />
         <Button variant="ghost" onClick={() => { clearInterval(timer.current); begin('call'); }} busy={busy}>Не получается позвонить — пусть позвонят мне</Button>
-        <Button variant="ghost" onClick={() => { clearInterval(timer.current); setStep('phone'); }}>Другой номер</Button>
+        <Button variant="ghost" onClick={() => { clearInterval(timer.current); clearPending(); setStep('phone'); }}>Другой номер</Button>
       </div>
     );
   }
@@ -95,7 +140,7 @@ export function PhoneCheck({ purpose, onTicket, initialPhone = '', submitLabel =
         </Field>
         <ErrorBox text={err} />
         <Button type="submit" variant="primary" size="lg" block busy={busy} disabled={code.length !== 4}>Подтвердить</Button>
-        <Button variant="ghost" onClick={() => setStep('phone')}>Назад</Button>
+        <Button variant="ghost" onClick={() => { clearPending(); setStep('phone'); }}>Назад</Button>
       </form>
     );
   }
@@ -119,7 +164,11 @@ function Links({ items }) {
 }
 
 export default function Auth() {
-  const [mode, setMode] = useState(() => (window.location.hash.includes('signup') ? 'signup' : 'login'));
+  const [mode, setMode] = useState(() => {
+    const p = readPending();
+    if (p) return { signup: 'signup', login: 'phone', reset: 'reset' }[p.purpose] || 'login';
+    return window.location.hash.includes('signup') ? 'signup' : 'login';
+  });
   if (mode === 'signup') return <Signup setMode={setMode} />;
   if (mode === 'reset') return <Reset setMode={setMode} />;
   if (mode === 'phone') return <PhoneLogin setMode={setMode} />;
@@ -166,11 +215,12 @@ function PhoneLogin({ setMode }) {
       <PhoneCheck purpose="login" submitLabel="Подтвердить номер" onTicket={async (ticket) => {
         try {
           const r = await pb.send('/api/ordius/phone/login', { method: 'POST', body: { ticket } });
+          clearPending();
           pb.authStore.save(r.token, r.record);
         } catch (e) { setErr(errText(e)); }
       }} />
       <ErrorBox text={err} />
-      <Links items={[['Войти с паролем', () => setMode('login')]]} />
+      <Links items={[['Войти с паролем', () => { clearPending(); setMode('login'); }]]} />
     </AuthFrame>
   );
 }
@@ -192,6 +242,7 @@ function Signup({ setMode }) {
     setBusy(true); setErr('');
     try {
       const r = await pb.send('/api/ordius/signup', { method: 'POST', body: { ticket, name, password } });
+      clearPending();
       pb.authStore.save(r.token, r.record);
     } catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
   }
@@ -200,7 +251,7 @@ function Signup({ setMode }) {
     return (
       <AuthFrame title="Регистрация" text="Сначала подтвердим номер: вы позвоните на номер, который покажет экран. Это бесплатно.">
         <PhoneCheck purpose="signup" submitLabel="Подтвердить номер" onTicket={(t, p) => { setTicket(t); setPhone(p); }} />
-        <Links items={[['Уже есть аккаунт — войти', () => setMode('login')]]} />
+        <Links items={[['Уже есть аккаунт — войти', () => { clearPending(); setMode('login'); }]]} />
       </AuthFrame>
     );
   }
@@ -240,6 +291,7 @@ function Reset({ setMode }) {
     setBusy(true); setErr('');
     try {
       await pb.send('/api/ordius/password-reset', { method: 'POST', body: viaCode ? { phone: p, code, password } : { ticket, password } });
+      clearPending();
       await pb.collection('users').authWithPassword(p, password);
     } catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
   }

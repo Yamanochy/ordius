@@ -11,8 +11,9 @@ trap 'report_failure "копия не сделана"' EXIT
 exec 9>"$ORDIUS_DATA/.backup.lock"
 flock -n 9 || { log "копирование уже идёт — пропускаю"; exit 0; }
 
-mkdir -p "$SNAP_DIR" "$PB_DATA/storage"
+mkdir -p "$SNAP_DIR"
 chmod 700 "$SNAP_DIR"
+ensure_storage
 
 # 1. Согласованный снимок базы. PocketBase в это время продолжает работать:
 #    .backup читает базу через SQLite API, а не копирует файл посреди записи.

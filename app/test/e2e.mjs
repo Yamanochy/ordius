@@ -95,6 +95,10 @@ await d.getByLabel('Номер мобильного').fill('8 923 000-00-03');
 await d.getByRole('button', { name: 'Подтвердить номер' }).click();
 await d.getByText('Ждём ваш звонок').waitFor();
 await shot(d, '02-call');
+// пока человек звонит, iOS может выгрузить страницу: после перезапуска проверка продолжается с того же места
+await d.reload();
+await d.getByText('Ждём ваш звонок').waitFor();
+check('после перезапуска экран звонка вернулся сам', true);
 await fetch(`http://127.0.0.1:${mockPort}/__call?check_id=c${seq}`);
 await d.getByLabel('Имя и фамилия').waitFor({ timeout: 10000 });
 await d.getByLabel('Имя и фамилия').fill('Дмитрий Ковалёв');
