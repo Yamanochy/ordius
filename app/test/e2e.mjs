@@ -245,6 +245,30 @@ const newCo = (await api('GET', `/api/collections/companies/records?filter=${enc
 check('новый руководитель создал компанию по коду и принял условия', newCo.length === 1 && newCo[0].terms_version === TERMS_VERSION && !!newCo[0].connect_code, newCo);
 await nctx.close();
 
+// ---------- Кабинет Ordius ----------
+await fetch(BASE + '/api/ordius/lead', { method: 'POST', headers: { Origin: 'https://ordius.ru' }, body: new URLSearchParams({
+  name: 'Павел Заявкин', phone: '+7 913 000-22-33', company: 'ООО «Снег»', fleet: 'c', method: 'x', comment: 'Три КДМ', consent: 'yes', website: '', elapsed: '9000' }) });
+await a.goto(BASE + '/#/more');
+await a.getByRole('link', { name: /Кабинет Ordius/ }).click();
+await a.getByRole('heading', { name: 'Кабинет Ordius' }).waitFor();
+await a.getByRole('button', { name: /ООО «Новый клиент»/ }).waitFor();
+await shot(a, '19-cabinet');
+await a.locator('.list').getByRole('button', { name: /ИП Мандров С\.Н\./ }).click();
+await a.getByRole('button', { name: 'Сохранить тариф' }).waitFor();
+await shot(a, '20-cabinet-company');
+await a.getByLabel('Тариф').selectOption('start');
+await a.getByRole('button', { name: 'Сохранить тариф' }).click();
+await a.getByText('Тариф изменён').waitFor();
+check('администратор поменял тариф компании в кабинете', (await api('GET', `/api/collections/companies/records/${C}`, su)).plan === 'start');
+await a.getByRole('radio', { name: /Заявки/ }).click();
+await a.getByRole('button', { name: /Павел Заявкин/ }).click();
+await a.getByLabel('Статус').selectOption('in_work');
+await a.getByLabel('Заметка').fill('Перезвонить утром');
+await shot(a, '21-cabinet-lead');
+await a.getByRole('button', { name: 'Сохранить', exact: true }).click();
+await a.getByText('Перезвонить утром').waitFor();
+check('заявка с сайта видна в кабинете, статус и заметка сохраняются', true);
+
 // тёмная тема, широкий экран офиса
 const wctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: 'dark', locale: 'ru-RU' });
 const w = await wctx.newPage();

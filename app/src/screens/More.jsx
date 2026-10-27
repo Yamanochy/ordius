@@ -63,6 +63,7 @@ export function More() {
         <>
           <span className="section-label">Администратор Ordius</span>
           <div className="list">
+            <Item to="/admin" icon="checks" title="Кабинет Ordius" sub="Компании, заявки с сайта, тарифы" />
             <Item to="/connect-codes" icon="list" title="Коды подключения" sub="Кто может создать компанию на пилоте" />
           </div>
         </>

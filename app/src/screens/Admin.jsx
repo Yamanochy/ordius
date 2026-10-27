@@ -3,8 +3,9 @@
 import React, { useState } from 'react';
 import { pb, errText } from '../lib/pb.js';
 import { useQuery } from '../lib/data.js';
-import { dayLabel, day10, isoDay } from '../lib/format.js';
-import { Button, Badge, Field, Icon, PageTitle, ErrorBox, Loading, Sheet, useToast } from '../ui.jsx';
+import { Link } from '../lib/router.jsx';
+import { dayLabel, day10, isoDay, prettyPhone } from '../lib/format.js';
+import { Button, Badge, Field, Icon, PageTitle, ErrorBox, Loading, Sheet, Select, Seg, useToast } from '../ui.jsx';
 
 // Ответ /api/ordius/me: администратор ли и нужен ли код для новой компании. Без связи — «код нужен».
 export function useMe() {
@@ -111,6 +112,154 @@ function NewCodeSheet({ onClose, onDone }) {
       </div>
       <ErrorBox text={err} />
       <Button variant="primary" block busy={busy} onClick={save}>Выдать код</Button>
+    </Sheet>
+  );
+}
+
+// ---------- Кабинет Ordius ----------
+// Сводные цифры по компаниям, контакты владельцев, заявки с сайта, тарифы. Данных работников клиентов здесь нет:
+// их Ordius обрабатывает только по поручению клиента.
+const PLANS = { pilot: 'Пилот', free: 'Бесплатный', start: 'Старт', business: 'Бизнес' };
+const LEAD_STATUS = { new: 'Новая', in_work: 'В работе', connected: 'Подключили', rejected: 'Отказ' };
+const LEAD_TONE = { new: 'info', in_work: 'warning', connected: 'success', rejected: '' };
+const short = (v) => (v ? dayLabel(day10(v), day10(v).slice(0, 4) !== isoDay().slice(0, 4)) : '—');
+
+export function AdminCabinet() {
+  const me = useMe();
+  const [tab, setTab] = useState('companies');
+  const summary = useQuery(me.admin ? 'admin-summary' : '', () => pb.send('/api/ordius/admin/summary', {}), { cache: false });
+  const companies = useQuery(me.admin ? 'admin-companies' : '', () => pb.send('/api/ordius/admin/companies', {}), { cache: false });
+  const leads = useQuery(me.admin ? 'admin-leads' : '', () => pb.send('/api/ordius/admin/leads', {}), { cache: false });
+  const [co, setCo] = useState(null);
+  const [lead, setLead] = useState(null);
+
+  if (me.loading && !me.admin) return <Loading />;
+  if (!me.admin) return <div className="stack"><PageTitle title="Кабинет Ordius" backTo="/more" /><p className="note">Раздел только для администратора Ordius.</p></div>;
+  const sm = summary.data || {};
+  const cos = (companies.data && companies.data.items) || [];
+  const lds = (leads.data && leads.data.items) || [];
+  const v = (n) => (summary.data ? n : '…');
+  return (
+    <div className="stack-lg">
+      <PageTitle title="Кабинет Ordius" eyebrow="Администратор Ordius" backTo="/more">
+        <Link to="/connect-codes" className="btn"><Icon name="list" size={18} />Коды подключения</Link>
+      </PageTitle>
+      <section className="kpis">
+        <div className="card stat"><span className="lbl">Компаний</span><span className="val">{v(sm.companies)}</span></div>
+        <div className="card stat"><span className="lbl">Людей в работе</span><span className="val">{v(sm.people_active)}</span></div>
+        <div className="card stat"><span className="lbl">Смен за 7 дней</span><span className="val">{v(sm.shifts7)}</span></div>
+      </section>
+      <Seg value={tab} onChange={setTab} label="Показать" options={[
+        { value: 'companies', label: `Компании${cos.length ? ' · ' + cos.length : ''}` },
+        { value: 'leads', label: `Заявки${sm.leads_new ? ' · новых ' + sm.leads_new : ''}` },
+      ]} />
+      {tab === 'companies' && (
+        <>
+          <ErrorBox text={companies.error} onRetry={companies.reload} />
+          {companies.loading && !cos.length ? <Loading /> : (
+            <div className="list">
+              {cos.length === 0 && <div className="list-empty">Компаний пока нет</div>}
+              {cos.map((c) => (
+                <button key={c.id} type="button" className="list-item" onClick={() => setCo(c)}>
+                  <div className="t">
+                    <b>{c.name}</b>
+                    <span>{[c.owner_name, prettyPhone(c.owner_phone)].filter(Boolean).join(' · ') || 'Владельца нет'}</span>
+                    <span>{`Людей ${c.people}${c.pending ? ` (+${c.pending} заявки)` : ''} · техники ${c.vehicles} · смен за 30 дн. ${c.shifts30} · последняя ${short(c.last_shift)}`}</span>
+                  </div>
+                  <div className="r"><Badge tone={c.plan === 'pilot' ? 'info' : 'success'}>{PLANS[c.plan] || '—'}</Badge></div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {tab === 'leads' && (
+        <>
+          <ErrorBox text={leads.error} onRetry={leads.reload} />
+          {leads.loading && !lds.length ? <Loading /> : (
+            <div className="list">
+              {lds.length === 0 && <div className="list-empty">Заявок с сайта пока нет</div>}
+              {lds.map((l) => (
+                <button key={l.id} type="button" className="list-item" onClick={() => setLead(l)}>
+                  <div className="t">
+                    <b>{l.name}{l.company ? ` · ${l.company}` : ''}</b>
+                    <span>{`${prettyPhone(l.phone)} · техники ${l.fleet} · ${l.method} · ${short(l.created)}`}</span>
+                    {(l.admin_note || l.comment) && <span className="ellipsis">{l.admin_note || l.comment}</span>}
+                  </div>
+                  <div className="r"><Badge tone={LEAD_TONE[l.status]}>{LEAD_STATUS[l.status] || l.status}</Badge></div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {co && <CompanySheet c={co} onClose={() => setCo(null)} onDone={() => { setCo(null); companies.reload(); }} />}
+      {lead && <LeadSheet l={lead} onClose={() => setLead(null)} onDone={() => { setLead(null); leads.reload(); summary.reload(); }} />}
+    </div>
+  );
+}
+
+function CompanySheet({ c, onClose, onDone }) {
+  const toast = useToast();
+  const [plan, setPlan] = useState(c.plan || 'pilot');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true); setErr('');
+    try { await pb.send(`/api/ordius/admin/companies/${c.id}/plan`, { method: 'POST', body: { plan } }); toast('Тариф изменён'); onDone(); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  }
+  const rows = [
+    ['ИНН', c.inn || '—'],
+    ['Владелец', c.owner_name || '—'],
+    ['Подключилась', `${short(c.created)}${c.code ? ` · код ${c.code} (${c.code_note})` : ' · без кода'}`],
+    ['Условия приняты', c.terms_at ? short(c.terms_at) : 'нет отметки (создана до 27.10.2026)'],
+    ['Люди', `${c.people} в работе${c.pending ? `, ${c.pending} заявки` : ''}`],
+    ['Техника', String(c.vehicles)],
+    ['Смен за 30 дней', String(c.shifts30)],
+    ['Последняя смена', short(c.last_shift)],
+  ];
+  return (
+    <Sheet title={c.name} onClose={onClose}>
+      {c.owner_phone && <a className="btn block" href={`tel:${c.owner_phone}`}><Icon name="phone" size={18} />{prettyPhone(c.owner_phone)}</a>}
+      <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 16px', margin: 0, fontSize: 15, lineHeight: '20px' }}>
+        {rows.map(([k, val]) => (
+          <React.Fragment key={k}>
+            <dt style={{ color: 'var(--ink-muted)' }}>{k}</dt>
+            <dd style={{ margin: 0, fontWeight: 500, minWidth: 0, overflowWrap: 'anywhere' }}>{val}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+      <Field label="Тариф" hint="Владелец увидит запись о смене тарифа в журнале компании">
+        <Select value={plan} onChange={setPlan} options={Object.entries(PLANS).map(([value, label]) => ({ value, label }))} />
+      </Field>
+      <ErrorBox text={err} />
+      <Button variant="primary" block busy={busy} disabled={plan === c.plan} onClick={save}>Сохранить тариф</Button>
+    </Sheet>
+  );
+}
+
+function LeadSheet({ l, onClose, onDone }) {
+  const toast = useToast();
+  const [status, setStatus] = useState(l.status || 'new');
+  const [note, setNote] = useState(l.admin_note || '');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true); setErr('');
+    try { await pb.send(`/api/ordius/admin/leads/${l.id}`, { method: 'POST', body: { status, admin_note: note } }); toast('Сохранено'); onDone(); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  }
+  return (
+    <Sheet title={`Заявка #${l.ref}`} onClose={onClose}>
+      <p className="note" style={{ margin: 0 }}>{`${l.name}${l.company ? ' · ' + l.company : ''} · ${short(l.created)}`}</p>
+      <a className="btn block" href={`tel:${l.phone}`}><Icon name="phone" size={18} />{prettyPhone(l.phone)}</a>
+      <p className="small" style={{ margin: 0 }}>{`Техники: ${l.fleet} · учёт: ${l.method}`}</p>
+      {l.comment && <p className="small" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{l.comment}</p>}
+      <Field label="Статус">
+        <Select value={status} onChange={setStatus} options={Object.entries(LEAD_STATUS).map(([value, label]) => ({ value, label }))} />
+      </Field>
+      <Field label="Заметка" hint="Видите только вы"><textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+      <ErrorBox text={err} />
+      <Button variant="primary" block busy={busy} onClick={save}>Сохранить</Button>
     </Sheet>
   );
 }
