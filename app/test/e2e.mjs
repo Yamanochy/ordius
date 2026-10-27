@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import net from 'node:net';
 import { createRequire } from 'node:module';
+import { TERMS_VERSION } from '../src/lib/legal.js';
 
 const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
@@ -68,7 +69,7 @@ await api('PATCH', '/api/settings', su, { rateLimits: { enabled: false } });
 const PASS = 'Test-passw0rd-1';
 await api('POST', '/api/collections/users/records', su, { name: 'Сергей Мандров', phone: '+79230000001', password: PASS, passwordConfirm: PASS });
 const A = (await api('POST', '/api/collections/users/auth-with-password', null, { identity: '+79230000001', password: PASS })).token;
-const co = await api('POST', '/api/collections/companies/records', A, { name: 'ИП Мандров С.Н.', inn: '540600000000' });
+const co = await api('POST', '/api/collections/companies/records', A, { name: 'ИП Мандров С.Н.', inn: '540600000000', terms: TERMS_VERSION });
 const C = co.id;
 const v1 = await api('POST', '/api/collections/vehicles/records', A, { company: C, name: 'Шакман X3000', plate: 'А123ВС154', kind: 'dump_truck', active: true, fuel_norm_100km: 38 });
 await api('POST', '/api/collections/vehicles/records', A, { company: C, name: 'МК-1000', plate: 'Е777КХ154', kind: 'road_sweeper', active: true });

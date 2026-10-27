@@ -8,9 +8,11 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
+import { createRequire } from "node:module";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PB = process.env.PB_BIN;
+const TERMS = createRequire(import.meta.url)(join(ROOT, "pb_hooks/lib/legal.js")).TERMS_VERSION;
 if (!PB) { console.error("Укажите PB_BIN — путь к pocketbase"); process.exit(2); }
 
 let failed = 0, passed = 0;
@@ -109,7 +111,7 @@ const settings = (await api("GET", "/api/settings", { token: su })).json;
 const labels = settings.rateLimits.rules.map((r) => r.label);
 check("ограничения частоты: стандартные правила на месте и добавлены коды и звонки",
   settings.rateLimits.enabled && ["*:auth", "POST /api/ordius/join", "POST /api/ordius/password-reset", "POST /api/ordius/phone/start",
-    "POST /api/ordius/phone/verify", "POST /api/ordius/phone/status", "POST /api/ordius/signup"]
+    "POST /api/ordius/phone/verify", "POST /api/ordius/phone/status", "POST /api/ordius/signup", "POST /api/ordius/lead"]
     .every((l) => labels.includes(l)), labels);
 check("в журнале запросов нет IP, хранится 14 дней", settings.logs.logIP === false && settings.logs.maxDays === 14, settings.logs);
 await api("PATCH", "/api/settings", { token: su, body: { rateLimits: { enabled: false } } });
@@ -129,7 +131,7 @@ async function ticketFor(phone, purpose, token) {
   return s1.json.ticket;
 }
 async function signup(name, phone) {
-  const r = await api("POST", "/api/ordius/signup", { body: { ticket: await ticketFor(phone, "signup"), name, password: PASS } });
+  const r = await api("POST", "/api/ordius/signup", { body: { ticket: await ticketFor(phone, "signup"), name, password: PASS, terms: TERMS } });
   if (!is2xx(r)) throw new Error("signup " + name + ": " + r.text);
   return r.json;
 }
@@ -157,7 +159,7 @@ check("запрос к SMS.ru: ключ, номер без «+», без адр�
   sentAdd.params.api_id === SMSRU_KEY && sentAdd.params.phone === "79230000001" && sentAdd.params.ip === undefined, sentAdd);
 check("до звонка — ждём", (await phoneStatus(st.json.check)).json.status === "waiting");
 check("до звонка билет не действует",
-  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS } })).status === 400);
+  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS, terms: TERMS } })).status === 400);
 const polls = seen.length;
 await phoneStatus(st.json.check);
 check("SMS.ru опрашивается не чаще раза в 2 секунды", seen.length === polls);
@@ -166,19 +168,24 @@ await new Promise((r) => setTimeout(r, 2100));
 check("после звонка — подтверждено", (await phoneStatus(st.json.check)).json.status === "verified");
 check("по проверке «звонок с кодом» цифры не принимаются", (await phoneVerify(st.json.check, TEST_CODE)).status === 400);
 check("регистрация по чужому билету не проходит",
-  (await api("POST", "/api/ordius/signup", { body: { ticket: "x".repeat(40), name: "Иван", password: PASS } })).status === 400);
+  (await api("POST", "/api/ordius/signup", { body: { ticket: "x".repeat(40), name: "Иван", password: PASS, terms: TERMS } })).status === 400);
 check("короткий пароль не принимается",
-  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: "123" } })).status === 400);
-const regA = await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS } });
+  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: "123", terms: TERMS } })).status === 400);
+check("без принятия условий не зарегистрироваться",
+  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS } })).status === 400);
+check("со старой редакцией условий не зарегистрироваться — просим обновить страницу",
+  /обновите страницу/.test((await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS, terms: "2026-01-01" } })).text));
+const regA = await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Петров", password: PASS, terms: TERMS } });
 check("регистрация по подтверждённому номеру — сразу вход", is2xx(regA) && regA.json.token && regA.json.record.phone === "+79230000001", regA.json);
+check("у пользователя записано, какие условия и когда он принял", regA.json.record.terms_version === TERMS && !!regA.json.record.terms_at, regA.json.record);
 check("билет одноразовый",
-  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Второй", password: PASS } })).status === 400);
+  (await api("POST", "/api/ordius/signup", { body: { ticket: st.json.ticket, name: "Иван Второй", password: PASS, terms: TERMS } })).status === 400);
 check("на занятый номер второй раз не зарегистрироваться", (await phoneStart("89230000001", "signup")).status === 400);
 const stx = await phoneStart("+79230000096", "signup");
 await fetch(`${MOCK}/__expire?check_id=${encodeURIComponent(await providerIdOf(stx.json.check))}`);
 check("не позвонил вовремя — проверка сгорела", (await phoneStatus(stx.json.check)).json.status === "expired");
 check("по сгоревшей проверке не зарегистрироваться",
-  (await api("POST", "/api/ordius/signup", { body: { ticket: stx.json.ticket, name: "Опоздал", password: PASS } })).status === 400);
+  (await api("POST", "/api/ordius/signup", { body: { ticket: stx.json.ticket, name: "Опоздал", password: PASS, terms: TERMS } })).status === 400);
 
 // запасной способ: робот звонит, человек вводит последние 4 цифры
 const sc = await phoneStart("+79230000095", "signup", null, "call");
@@ -192,7 +199,7 @@ const okv = await phoneVerify(sc.json.check, TEST_CODE);
 check("верные цифры дают билет", is2xx(okv) && okv.json.ticket && okv.json.phone === "+79230000095", okv.json);
 check("код одноразовый", (await phoneVerify(sc.json.check, TEST_CODE)).status === 400);
 check("регистрация по билету после звонка с кодом", is2xx(await api("POST", "/api/ordius/signup",
-  { body: { ticket: okv.json.ticket, name: "Олег Запасной", password: PASS } })));
+  { body: { ticket: okv.json.ticket, name: "Олег Запасной", password: PASS, terms: TERMS } })));
 check("у проверки «звонок с кодом» статуса звонка нет", (await phoneStatus(sc.json.check)).status === 404);
 
 // попытки: после 5 неверных проверка сгорает
@@ -226,18 +233,23 @@ const MECH = await login("+79230000006");
 const MGR = await login("+79230000007");
 
 // ---------- компании ----------
-const cA = await create("companies", A.token, { name: "ООО «Ромашка»", inn: "5406000000" });
+const cA = await create("companies", A.token, { terms: TERMS, name: "ООО «Ромашка»", inn: "5406000000" });
 check("владелец создаёт компанию", is2xx(cA), cA.json);
+check("у компании записано, кто и когда принял условия с поручением", cA.json.terms_version === TERMS && !!cA.json.terms_at && cA.json.created_by === A.id, cA.json);
+const noTerms = await create("companies", A.token, { name: "Без условий" });
+check("без принятия условий компанию не создать", noTerms.status === 400 && /условия/.test(noTerms.text), noTerms.json);
+check("принятую редакцию у компании не подделать", (await update("companies", cA.json.id, A.token, { terms_version: "2030-01-01" })).status === 400);
+check("принятую редакцию у себя не подделать", (await update("users", A.id, A.token, { terms_version: "2030-01-01" })).status >= 400);
 const companyA = cA.json.id;
 check("у компании есть код вступления", /^[A-Z2-9]{8}$/.test(cA.json.join_code || ""), cA.json);
 check("тариф по умолчанию — пилот", cA.json.plan === "pilot");
-const forgedCode = await create("companies", A.token, { name: "X", join_code: "AAAAAAAA" });
+const forgedCode = await create("companies", A.token, { terms: TERMS, name: "X", join_code: "AAAAAAAA" });
 check("код вступления клиент не задаёт", forgedCode.status === 400, forgedCode.json);
-const freePlan = await create("companies", A.token, { name: "Y", plan: "business" });
+const freePlan = await create("companies", A.token, { terms: TERMS, name: "Y", plan: "business" });
 check("тариф клиент себе не выставляет", freePlan.status === 400, freePlan.json);
 check("тариф не поменять правкой", (await update("companies", companyA, A.token, { plan: "business" })).status === 400);
 check("владелец переименовывает компанию", is2xx(await update("companies", companyA, A.token, { name: "ООО «Ромашка-Сервис»" })));
-const cB = await create("companies", B.token, { name: "ИП Лютиков" });
+const cB = await create("companies", B.token, { terms: TERMS, name: "ИП Лютиков" });
 const companyB = cB.json.id;
 
 const myA = await list("memberships", A.token, `company = "${companyA}"`);
@@ -790,9 +802,80 @@ const relog = await api("POST", "/api/collections/users/auth-with-password", { b
 check("вход с новым паролем", relog.status === 200 && !!relog.json.token, relog.json);
 check("код одноразовый", (await reset(d1Code.json.code)).status === 400);
 
+// ---------- заявки с формы на ordius.ru ----------
+const mails = [];
+const smtp = net.createServer((sock) => {
+  sock.setEncoding("utf8");
+  let buf = "", inData = false, data = "";
+  const w = (l) => sock.write(l + "\r\n");
+  w("220 test ESMTP");
+  sock.on("data", (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf("\r\n")) !== -1) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (inData) {
+        if (line === ".") { inData = false; mails.push(data); data = ""; w("250 OK"); } else data += line + "\n";
+        continue;
+      }
+      const cmd = line.slice(0, 4).toUpperCase();
+      if (cmd === "EHLO") sock.write("250-test\r\n250-AUTH PLAIN\r\n250 8BITMIME\r\n");
+      else if (cmd === "AUTH") w("235 OK");
+      else if (cmd === "DATA") { inData = true; w("354 go"); }
+      else if (cmd === "QUIT") { w("221 bye"); sock.end(); }
+      else w("250 OK");
+    }
+  });
+});
+const smtpPort = await freePort();
+await new Promise((r) => smtp.listen(smtpPort, "127.0.0.1", r));
+const leadForm = (fields) => new URLSearchParams({ name: "Иван Петров", phone: "8 (913) 000-11-22", company: "ИП Петров",
+  fleet: "b", method: "x", comment: "Есть два самосвала", website: "", consent: "yes", elapsed: "8000", ...fields });
+const postLead = async (fields, origin = "https://ordius.ru") => {
+  const headers = {};
+  if (origin) headers.Origin = origin;
+  const r = await fetch(BASE + "/api/ordius/lead", { method: "POST", headers, body: leadForm(fields) });
+  const text = await r.text();
+  let json = null; try { json = JSON.parse(text); } catch (_) {}
+  return { status: r.status, json, text };
+};
+const leadsNow = async () => (await api("GET", "/api/collections/leads/records?perPage=200&sort=created", { token: su })).json.items;
+
+check("заявку с чужого сайта не принимаем", (await postLead({}, "https://evil.example")).status === 403);
+check("заявку без адреса сайта не принимаем", (await postLead({}, null)).status === 403);
+const botTrap = await postLead({ website: "http://spam" });
+const botFast = await postLead({ elapsed: "300" });
+check("бот (ловушка, слишком быстро) получает «принято», но ничего не сохраняется",
+  botTrap.json.ok === true && botFast.json.ok === true && (await leadsNow()).length === 0);
+const badLead = await postLead({ name: "", phone: "123", fleet: "z", method: "", consent: "" });
+check("неверные поля — список полей", badLead.status === 400 &&
+  ["name", "phone", "fleet", "method", "consent"].every((f) => badLead.json.fields.includes(f)), badLead.json);
+const okLead = await postLead({});
+check("заявка принята, есть номер", okLead.status === 200 && /^[A-Z2-9]{6}$/.test(okLead.json.ref || ""), okLead.json);
+const saved = (await leadsNow())[0];
+check("заявка записана с отметкой о согласии, телефон в едином виде", saved && saved.ref === okLead.json.ref &&
+  saved.phone === "+79130001122" && saved.fleet === "6–15" && saved.method === "Excel" && saved.consent_version &&
+  !!saved.consent_at && saved.mailed === false, saved);
+check("в заявке нет IP-адреса", saved && !JSON.stringify(saved).includes("127.0.0.1"));
+check("заявки не видны пользователям", (await api("GET", "/api/collections/leads/records", { token: A.token })).status === 403);
+check("заявки не видны без входа", (await api("GET", "/api/collections/leads/records", {})).status === 403);
+check("заявку не создать в обход формы", (await create("leads", A.token, { ref: "AAAAAA", name: "X", phone: "+79130000000",
+  consent_version: "x", consent_at: "2026-01-01 00:00:00.000Z" })).status >= 400);
+await api("PATCH", "/api/settings", { token: su, body: {
+  meta: { senderName: "Ordius", senderAddress: "ordius.info@test.local" },
+  smtp: { enabled: true, host: "127.0.0.1", port: smtpPort, username: "u", password: "p", tls: false, authMethod: "PLAIN" } } });
+const mailedLead = await postLead({ name: "Анна Почтовая" });
+const mailedRec = (await leadsNow()).find((l) => l.ref === mailedLead.json.ref);
+check("почта настроена — карточка заявки уходит письмом", mailedLead.status === 200 && mails.length === 1 &&
+  mails[0].includes(mailedLead.json.ref) && mailedRec && mailedRec.mailed === true, { mails: mails.length, rec: mailedRec });
+smtp.close();
+await api("PATCH", "/api/settings", { token: su, body: { smtp: { enabled: false } } });
+const deadMail = await postLead({ name: "Без почты" });
+check("почта не работает — заявка всё равно сохраняется", deadMail.status === 200 && (await leadsNow()).some((l) => l.ref === deadMail.json.ref));
+
 // ---------- защита от засорения ----------
-for (let i = 0; i < 4; i++) await create("companies", B.token, { name: "Б-" + i });
-const sixth = await create("companies", B.token, { name: "Б-лишняя" });
+for (let i = 0; i < 4; i++) await create("companies", B.token, { terms: TERMS, name: "Б-" + i });
+const sixth = await create("companies", B.token, { terms: TERMS, name: "Б-лишняя" });
 check("не больше 5 компаний на человека", sixth.status === 400 && /5 компаний/.test(sixth.text), sixth.json);
 
 // ---------- сервер без ключа SMS.ru и с неверным ключом ----------

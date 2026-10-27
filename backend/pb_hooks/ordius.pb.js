@@ -47,7 +47,9 @@ onRecordEnrich((e) => {
 
 // Номер меняется только через подтверждение звонком (/api/ordius/phone/change); напрямую — только администратор.
 const normalizeUserPhone = (e) => {
-  const { normalizePhone } = require(`${__hooks}/lib/util.js`);
+  const { normalizePhone, rejectServerFields } = require(`${__hooks}/lib/util.js`);
+  // какую редакцию условий человек принял — ставит только сервер при регистрации
+  rejectServerFields(e, ["terms_version", "terms_at"]);
   const body = e.requestInfo().body || {};
   const sent = Object.prototype.hasOwnProperty.call(body, "phone");
   if (sent && !e.hasSuperuserAuth() && normalizePhone(body.phone) !== e.record.original().get("phone")) {
@@ -230,10 +232,16 @@ routerAdd("POST", "/api/ordius/phone/verify", (e) => {
   return e.json(200, { ticket, phone: rec.get("phone"), purpose: rec.get("purpose") });
 });
 
-// Регистрация: POST /api/ordius/signup { ticket, name, password } → вход сразу (как auth-with-password).
+// Регистрация: POST /api/ordius/signup { ticket, name, password, terms } → вход сразу (как auth-with-password).
+// terms — редакция условий использования, которые человек видел и принял (lib/legal.js).
 routerAdd("POST", "/api/ordius/signup", (e) => {
   const ph = require(`${__hooks}/lib/phone.js`);
+  const legal = require(`${__hooks}/lib/legal.js`);
+  const { nowIso } = require(`${__hooks}/lib/util.js`);
   const body = e.requestInfo().body || {};
+  if (String(body.terms || "") !== legal.TERMS_VERSION) {
+    throw new BadRequestError("Примите условия использования. Если галочка уже стоит — обновите страницу: условия изменились");
+  }
   const chk = ph.findTicket(e.app, body.ticket, "signup");
   if (!chk) throw new BadRequestError("Подтвердите номер ещё раз");
   const name = String(body.name || "").trim().replace(/\s+/g, " ");
@@ -244,6 +252,8 @@ routerAdd("POST", "/api/ordius/signup", (e) => {
   user.set("name", name.slice(0, 120));
   user.set("phone", chk.get("phone"));
   user.set("emailVisibility", false);
+  user.set("terms_version", legal.TERMS_VERSION);
+  user.set("terms_at", nowIso());
   user.setPassword(pass);
   try {
     e.app.runInTransaction((tx) => {
@@ -349,15 +359,23 @@ cronAdd("ordius_phone_checks_cleanup", "17 21 * * *", () => {
 
 // ---------- компании: создатель становится владельцем ----------
 onRecordCreateRequest((e) => {
-  const { code, rejectServerFields, audit } = require(`${__hooks}/lib/util.js`);
+  const { code, rejectServerFields, audit, nowIso } = require(`${__hooks}/lib/util.js`);
+  const legal = require(`${__hooks}/lib/legal.js`);
   // тариф меняет только администратор сервера (после оплаты), не клиент
-  rejectServerFields(e, ["join_code", "created_by", "plan"]);
+  rejectServerFields(e, ["join_code", "created_by", "plan", "terms_version", "terms_at"]);
   if (!e.record.get("plan")) e.record.set("plan", "pilot");
   e.record.set("join_code", code(8));
   if (e.hasSuperuserAuth()) return e.next();
+  // Создатель компании принимает условия от её имени, включая поручение на обработку данных
+  // её работников (раздел 5 условий, ч. 3 ст. 6 152-ФЗ). Без этого данные людей вносить нельзя.
+  if (String((e.requestInfo().body || {}).terms || "") !== legal.TERMS_VERSION) {
+    throw new BadRequestError("Примите условия использования для компании. Если галочка уже стоит — обновите страницу");
+  }
   const mine = e.app.countRecords("companies", $dbx.hashExp({ created_by: e.auth.id }));
   if (mine >= 5) throw new BadRequestError("Создано уже 5 компаний. Если нужно больше — напишите в поддержку");
   e.record.set("created_by", e.auth.id);
+  e.record.set("terms_version", legal.TERMS_VERSION);
+  e.record.set("terms_at", nowIso());
   e.next();
 
   const m = new Record(e.app.findCollectionByNameOrId("memberships"));
@@ -378,7 +396,7 @@ onRecordCreateRequest((e) => {
 
 onRecordUpdateRequest((e) => {
   const { rejectServerFields, audit } = require(`${__hooks}/lib/util.js`);
-  rejectServerFields(e, ["join_code", "created_by", "plan"]);
+  rejectServerFields(e, ["join_code", "created_by", "plan", "terms_version", "terms_at"]);
   e.next();
   audit(e.app, "update", e.record, e.auth);
 }, "companies");

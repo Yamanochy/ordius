@@ -4,6 +4,7 @@ import { pb, errText } from '../lib/pb.js';
 import { useSession } from '../lib/session.jsx';
 import { useQuery } from '../lib/data.js';
 import { ROLES } from '../lib/format.js';
+import { TERMS_VERSION, TERMS_URL } from '../lib/legal.js';
 import { Logo, Button, Field, Icon, ErrorBox, Badge, useToast } from '../ui.jsx';
 
 export default function Welcome({ embedded }) {
@@ -16,6 +17,7 @@ export default function Welcome({ embedded }) {
   const [newCo, setNewCo] = useState(false);
   const [coName, setCoName] = useState('');
   const [coInn, setCoInn] = useState('');
+  const [coTerms, setCoTerms] = useState(false);
   const pending = s.memberships.filter((m) => m.status === 'pending');
 
   async function accept(id) {
@@ -41,9 +43,10 @@ export default function Welcome({ embedded }) {
   async function createCompany(e) {
     e.preventDefault();
     if (coName.trim().length < 2) { setErr('Укажите название компании'); return; }
+    if (!coTerms) { setErr('Нужно принять условия для компании'); return; }
     setBusy('co'); setErr('');
     try {
-      const c = await pb.collection('companies').create({ name: coName.trim(), inn: coInn.trim() || undefined });
+      const c = await pb.collection('companies').create({ name: coName.trim(), inn: coInn.trim() || undefined, terms: TERMS_VERSION });
       await s.reload();
       s.setCompany(c.id);
       toast('Компания создана. Вы — владелец');
@@ -88,6 +91,10 @@ export default function Welcome({ embedded }) {
           <h2 className="h2">Новая компания</h2>
           <Field label="Название"><input value={coName} onChange={(e) => setCoName(e.target.value)} placeholder="ИП Иванов И.И." /></Field>
           <Field label="ИНН" hint="Необязательно"><input inputMode="numeric" value={coInn} onChange={(e) => setCoInn(e.target.value.replace(/\D/g, ''))} maxLength={12} /></Field>
+          <label className="check small">
+            <input type="checkbox" checked={coTerms} onChange={(e) => setCoTerms(e.target.checked)} />
+            <span>Принимаю <a href={TERMS_URL} target="_blank" rel="noreferrer">условия использования</a> от имени компании, в том числе поручение Ordius обрабатывать данные её работников (раздел 5)</span>
+          </label>
           <Button type="submit" variant="primary" block busy={busy === 'co'}>Создать</Button>
         </form>
       )}
