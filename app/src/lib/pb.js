@@ -18,6 +18,8 @@ export function errText(err, fallback = 'Не получилось. Попроб
   const firstField = Object.keys(data)[0];
   if (r.message && !/^(Failed to|Something went wrong)/.test(r.message) && !(firstField && /validate/i.test(r.message))) return r.message;
   if (firstField) return FIELD_NAMES[firstField] ? `${FIELD_NAMES[firstField]}: ${fieldMsg(data[firstField])}` : fieldMsg(data[firstField]);
+  // общий отказ PocketBase без подробностей: нет прав по правилам или сбой на сервере
+  if (/^Failed to (create|update|delete) record/.test(r.message || '')) return 'Сервер не сохранил запись — попробуем ещё раз';
   if (err.status === 403) return 'Нет прав на это действие';
   if (err.status === 404) return 'Не найдено или нет доступа';
   if (err.status === 429) return 'Слишком много попыток. Подождите немного';

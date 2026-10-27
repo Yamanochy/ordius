@@ -12,6 +12,7 @@ ORDIUS_TAG=ordius
 
 PB_DATA="$ORDIUS_DATA/pb_data"
 SNAP_DIR="$ORDIUS_DATA/backup"
+PB_USER=${ORDIUS_PB_USER:-pocketbase}   # пользователь, от которого работает PocketBase
 
 # Хранение копий: 48 почасовых + 21 ежедневная. Старые версии в бакете живут ещё 7 дней,
 # итого данные удалённого человека исчезают из копий не позже чем через 30 дней (ч. 5 ст. 21 152-ФЗ).
@@ -19,6 +20,17 @@ KEEP_HOURLY=48
 KEEP_DAILY=21
 
 log()  { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
+
+# Папка фото и файлов принадлежит пользователю PocketBase. Если её создаст или перепишет root
+# (копия по таймеру, выкладка, восстановление), PocketBase не сможет сохранять фото —
+# приложение получит «Failed to create record». Чиним только то, что принадлежит не ему.
+ensure_storage() {
+  mkdir -p "$PB_DATA/storage"
+  if id "$PB_USER" >/dev/null 2>&1; then
+    find "$PB_DATA" -maxdepth 0 ! -user "$PB_USER" -exec chown "$PB_USER:" {} +
+    find "$PB_DATA/storage" ! -user "$PB_USER" -exec chown -h "$PB_USER:" {} +
+  fi
+}
 warn() { printf '%s ВНИМАНИЕ: %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 die()  { printf '%s ОШИБКА: %s\n' "$(date -u +%FT%TZ)" "$*" >&2; exit 1; }
 

@@ -43,6 +43,7 @@ if [ -d "$REPO/app/dist" ]; then
 elif [ ! -e "$ORDIUS_OPT/pb_public/index.html" ]; then
   cp "$REPO/server/config/placeholder.html" "$ORDIUS_OPT/pb_public/index.html"
 fi
+ensure_storage
 log "файлы разложены"
 
 [ "$restart" = "1" ] || exit 0

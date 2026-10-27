@@ -56,8 +56,8 @@ if [ -s "$key" ]; then
   [ -s "$ORDIUS_ETC/pocketbase.env" ] && cp "$ORDIUS_ETC/pocketbase.env" "$ORDIUS_ETC/pocketbase.env.before-restore-$stamp"
   install -m 600 "$key" "$ORDIUS_ETC/pocketbase.env"
 fi
-if getent passwd pocketbase >/dev/null; then
-  chown -R pocketbase:pocketbase "$PB_DATA"
+if id "$PB_USER" >/dev/null 2>&1; then
+  chown -R "$PB_USER:" "$PB_DATA"
 fi
 
 log "запускаю PocketBase"
