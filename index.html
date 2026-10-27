@@ -746,6 +746,7 @@
         <a href="mailto:ordius.info@yandex.ru">ordius.info@yandex.ru</a>
         <a data-contact href="#">Telegram</a>
         <a href="privacy.html">Политика обработки персональных данных</a>
+        <a href="terms.html">Условия использования</a>
       </nav>
     </div>
     <div class="wrap">
@@ -776,8 +777,9 @@
       document.querySelectorAll('[data-contact]').forEach(function (a) { a.href = CONTACT; a.target = '_blank'; a.rel = 'noopener'; });
     }
 
-    // Форма записи на пилот. Адрес облачной функции Yandex Cloud (ссылка для вызова).
-    // Пока пусто — формы нет, вместо неё кнопка Telegram.
+    // Форма записи на пилот. Заявки принимает сервер Ordius: 'https://app.ordius.ru/api/ordius/lead'
+    // (backend/pb_hooks/leads.pb.js). Адрес вписывается после подачи уведомления в Роскомнадзор;
+    // пока пусто — формы нет, вместо неё кнопка Telegram.
     var FORM_ENDPOINT = '';
     (function () {
       try {

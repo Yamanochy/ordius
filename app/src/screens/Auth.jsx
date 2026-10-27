@@ -3,6 +3,7 @@
 // Запасной путь — робот звонит человеку, и тот вводит последние 4 цифры входящего номера.
 import React, { useEffect, useRef, useState } from 'react';
 import { pb, errText } from '../lib/pb.js';
+import { TERMS_VERSION, TERMS_URL, PRIVACY_URL } from '../lib/legal.js';
 import { normalizePhone, prettyPhone } from '../lib/format.js';
 import { Logo, Button, Field, Icon, ErrorBox } from '../ui.jsx';
 
@@ -238,10 +239,10 @@ function Signup({ setMode }) {
     e.preventDefault();
     if (name.trim().length < 2) { setErr('Укажите имя и фамилию'); return; }
     if (password.length < 8) { setErr('Пароль — не короче 8 символов'); return; }
-    if (!agree) { setErr('Нужно согласие на обработку персональных данных'); return; }
+    if (!agree) { setErr('Нужно принять условия использования'); return; }
     setBusy(true); setErr('');
     try {
-      const r = await pb.send('/api/ordius/signup', { method: 'POST', body: { ticket, name, password } });
+      const r = await pb.send('/api/ordius/signup', { method: 'POST', body: { ticket, name, password, terms: TERMS_VERSION } });
       clearPending();
       pb.authStore.save(r.token, r.record);
     } catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
@@ -266,7 +267,7 @@ function Signup({ setMode }) {
         </Field>
         <label className="check small">
           <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-          <span>Соглашаюсь на обработку персональных данных по <a href="https://ordius.ru/privacy.html" target="_blank" rel="noreferrer">политике Ordius</a></span>
+          <span>Принимаю <a href={TERMS_URL} target="_blank" rel="noreferrer">условия использования</a>. Как Ordius обрабатывает данные — в <a href={PRIVACY_URL} target="_blank" rel="noreferrer">политике</a></span>
         </label>
         <ErrorBox text={err} />
         <Button type="submit" variant="primary" size="lg" block busy={busy}>Зарегистрироваться</Button>

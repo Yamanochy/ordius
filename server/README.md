@@ -94,6 +94,27 @@ ordius-status
 Даже с паролем администратора войти в панель можно только с самого сервера: PocketBase проверяет IP
 (настройка в `backend/pb_migrations/…_ordius_settings.js`).
 
+## Почта для заявок с сайта
+
+Заявки с формы на ordius.ru сохраняются на сервере всегда (коллекция `leads` в панели). Чтобы каждая ещё и приходила
+письмом на ordius.info@yandex.ru, один раз настроить почту PocketBase:
+
+1. id.yandex.ru (вход как ordius.info@yandex.ru) → «Безопасность» → «Пароли приложений» → в строке «Почта» нажать «+» →
+   название `Сервер Ordius` → «Далее» → скопировать пароль. Он показывается один раз; никому не пересылать, в чат тоже.
+2. Открыть панель администратора через SSH-туннель (раздел выше).
+3. Слева **Settings** → **Mail settings**:
+   - Sender name: `Ordius`; Sender address: `ordius.info@yandex.ru`;
+   - включить **Use SMTP mail server**;
+   - SMTP server host: `smtp.yandex.ru`, Port: `465`;
+   - Username: `ordius.info@yandex.ru`, Password: пароль из шага 1;
+   - TLS encryption: **Always**, AUTH method: **PLAIN** → **Save changes**.
+4. Кнопка **Send test email** → шаблон любой → адрес `ordius.info@yandex.ru` → **Send**. Письмо должно прийти за минуту.
+   Не пришло и в ответ ошибка подключения (timeout) — написать в поддержку Timeweb Cloud, что нужен исходящий порт 465
+   к smtp.yandex.ru.
+
+Пароль приложения хранится в настройках PocketBase зашифрованным (ключ — `/etc/ordius/pocketbase.env`).
+Посмотреть заявки без почты: панель → коллекция `leads`.
+
 ## Копии
 
 | | |
