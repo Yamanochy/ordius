@@ -17,6 +17,12 @@ routerAdd("POST", "/api/ordius/lead", (e) => {
   if (lead.allowedOrigins($os.getenv("ORDIUS_LEAD_ORIGINS")).indexOf(origin) === -1) {
     return e.json(403, { ok: false, error: "origin" });
   }
+  // Сервер запущен с --origins=https://app.ordius.ru, и общий CORS-обработчик PocketBase не разрешает
+  // ordius.ru читать ответ: заявка сохранилась бы, а человек увидел бы «не получилось» и отправил бы её ещё раз.
+  // Разрешаем чтение ответа только этого маршрута и только для страниц из списка выше.
+  // Форма шлёт обычный POST без своих заголовков, поэтому предварительного запроса OPTIONS нет.
+  e.response.header().set("Access-Control-Allow-Origin", origin);
+  e.response.header().add("Vary", "Origin");
   let f = {};
   try { f = e.requestInfo().body || {}; } catch (_) { f = {}; }
 

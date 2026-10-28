@@ -777,14 +777,15 @@
       document.querySelectorAll('[data-contact]').forEach(function (a) { a.href = CONTACT; a.target = '_blank'; a.rel = 'noopener'; });
     }
 
-    // Форма записи на пилот. Заявки принимает сервер Ordius: 'https://app.ordius.ru/api/ordius/lead'
-    // (backend/pb_hooks/leads.pb.js). Адрес вписывается после подачи уведомления в Роскомнадзор;
-    // пока пусто — формы нет, вместо неё кнопка Telegram.
-    var FORM_ENDPOINT = '';
+    // Форма записи на пилот. Заявки принимает сервер Ordius (backend/pb_hooks/leads.pb.js).
+    // Включена после подачи уведомления в Роскомнадзор (28.10.2026, № 100476786).
+    // Пустая строка выключает форму — вместо неё остаётся кнопка Telegram.
+    var FORM_ENDPOINT = 'https://app.ordius.ru/api/ordius/lead';
     (function () {
       try {
+        // для проверки на своём компьютере: ?form_endpoint=http://127.0.0.1:8090/api/ordius/lead
         var dev = new URLSearchParams(location.search).get('form_endpoint');
-        if (dev && /^http:\/\/(localhost|127\.0\.0\.1):\d+\/?$/.test(dev)) FORM_ENDPOINT = dev;
+        if (dev && /^http:\/\/(localhost|127\.0\.0\.1):\d+(\/[\w.\/-]*)?$/.test(dev)) FORM_ENDPOINT = dev;
       } catch (e) {}
       if (!FORM_ENDPOINT || !window.fetch) return;
       document.body.classList.remove('no-form');
