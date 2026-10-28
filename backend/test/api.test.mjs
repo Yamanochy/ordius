@@ -938,10 +938,10 @@ check("отозванный код не действует", egorCo.status === 4
 
 // ---------- сервер без ключа SMS.ru и с неверным ключом ----------
 // Поднимаем ещё два PocketBase: без ключа и с ключом, который «SMS.ru» не принимает.
-async function extraServer(extraEnv) {
+async function extraServer(extraEnv, extraArgs = []) {
   const d = mkdtempSync(join(tmpdir(), "ordius-pb-"));
   const p = await freePort();
-  const a = [`--dir=${d}/pb_data`, `--migrationsDir=${ROOT}/pb_migrations`, `--hooksDir=${ROOT}/pb_hooks`, "--encryptionEnv=PB_ENCRYPTION_KEY"];
+  const a = [`--dir=${d}/pb_data`, `--migrationsDir=${ROOT}/pb_migrations`, `--hooksDir=${ROOT}/pb_hooks`, "--encryptionEnv=PB_ENCRYPTION_KEY", ...extraArgs];
   const en = { ...process.env, PB_ENCRYPTION_KEY: "abcdefghijklmnopqrstuvwxyz012345", ...extraEnv };
   const proc = spawn(PB, ["serve", `--http=127.0.0.1:${p}`, ...a], { env: en, stdio: "ignore" });
   for (let i = 0; i < 100; i++) {
@@ -954,8 +954,31 @@ async function extraServer(extraEnv) {
     let json = null; try { json = JSON.parse(text); } catch (_) {}
     return { status: r.status, json, text };
   };
-  return { call, stop: () => { try { proc.kill(); } catch (_) {} rmSync(d, { recursive: true, force: true }); } };
+  const raw = (path, init) => fetch(`http://127.0.0.1:${p}${path}`, init);
+  return { call, raw, stop: () => { try { proc.kill(); } catch (_) {} rmSync(d, { recursive: true, force: true }); } };
 }
+
+// ---------- форма на ordius.ru и сервер, запущенный как в бою: --origins=https://app.ordius.ru ----------
+// Общий CORS PocketBase пускает только приложение; ответ на заявку сайт должен прочитать сам,
+// иначе браузер покажет «не получилось», хотя заявка сохранена, и человек отправит её повторно.
+const prod = await extraServer({}, ["--origins=https://app.ordius.ru"]);
+const sendLead = (origin, fields = {}) => prod.raw("/api/ordius/lead", { method: "POST",
+  headers: origin ? { Origin: origin } : {}, body: leadForm({ name: "Сайт Проверка", ...fields }) });
+const siteLead = await sendLead("https://ordius.ru");
+const siteLeadJson = await siteLead.json().catch(() => ({}));
+check("сервер как в бою: ordius.ru читает ответ на заявку", siteLead.status === 200 && siteLeadJson.ok === true &&
+  siteLead.headers.get("access-control-allow-origin") === "https://ordius.ru", { status: siteLead.status, acao: siteLead.headers.get("access-control-allow-origin") });
+const wwwLead = await sendLead("https://www.ordius.ru", { phone: "8 (913) 000-11-33" });
+check("и www.ordius.ru тоже", wwwLead.headers.get("access-control-allow-origin") === "https://www.ordius.ru");
+const badFields = await sendLead("https://ordius.ru", { name: "" });
+check("ошибку в полях сайт тоже может прочитать", badFields.status === 400 &&
+  badFields.headers.get("access-control-allow-origin") === "https://ordius.ru");
+const evilLead = await sendLead("https://evil.example");
+check("чужому сайту доступ к ответу не открываем", evilLead.status === 403 && !evilLead.headers.get("access-control-allow-origin"));
+const otherApi = await prod.raw("/api/health", { headers: { Origin: "https://ordius.ru" } });
+check("остальной API для ordius.ru по-прежнему закрыт", !otherApi.headers.get("access-control-allow-origin"));
+prod.stop();
+
 const noKey = await extraServer({ ORDIUS_SMSRU_BASE: MOCK });
 const nk = await noKey.call("/api/ordius/phone/start", { phone: "+79231112233", purpose: "signup" });
 check("без ключа SMS.ru сервер честно отвечает «не настроено»", nk.status === 503, nk.json);
