@@ -268,6 +268,19 @@ await shot(a, '21-cabinet-lead');
 await a.getByRole('button', { name: 'Сохранить', exact: true }).click();
 await a.getByText('Перезвонить утром').waitFor();
 check('заявка с сайта видна в кабинете, статус и заметка сохраняются', true);
+await a.getByRole('radio', { name: /Компании/ }).click();
+await a.locator('.list').getByRole('button', { name: /ООО «Новый клиент»/ }).click();
+await a.getByRole('button', { name: 'Удалить компанию…' }).click();
+const killBtn = a.getByRole('button', { name: 'Удалить навсегда' });
+await a.getByLabel('Введите название компании').fill('ООО «Новый');
+check('без полного названия кнопка удаления не активна', await killBtn.isDisabled());
+await a.getByLabel('Введите название компании').fill('ООО «Новый клиент»');
+await shot(a, '22-cabinet-delete');
+await killBtn.click();
+await a.getByText('Компания удалена').waitFor();
+check('администратор удалил компанию из кабинета',
+  (await api('GET', `/api/collections/companies/records?filter=${encodeURIComponent('name="ООО «Новый клиент»"')}`, su)).items.length === 0 &&
+  !(await a.locator('.list').getByRole('button', { name: /ООО «Новый клиент»/ }).count()));
 
 // тёмная тема, широкий экран офиса
 const wctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: 'dark', locale: 'ru-RU' });

@@ -936,6 +936,36 @@ check("администратор отзывает код", is2xx(revoked) && re
 const egorCo = await create("companies", egor.token, { terms: TERMS, name: "Егор и Ко", connect_key: code2.code });
 check("отозванный код не действует", egorCo.status === 400 && /код подключения/.test(egorCo.text), egorCo.json);
 
+// ---------- удаление компании (кабинет администратора) ----------
+// Компания A к этому месту набрала данные почти во всех разделах: смены, деньги, контракты, задачи, топливо, чат.
+const allCols = (await api("GET", "/api/collections?perPage=200", { token: su })).json.items;
+const companyCols = allCols.filter((c) => c.type === "base" &&
+  c.fields.some((f) => f.name === "company" && f.type === "relation")).map((c) => c.name);
+const countIn = async (col, company) => (await api("GET",
+  `/api/collections/${col}/records?perPage=1&filter=${encodeURIComponent(`company = "${company}"`)}`, { token: su })).json.totalItems;
+const snapshot = async (company) => { const o = {}; for (const col of companyCols) o[col] = await countIn(col, company); return o; };
+const totalOf = async (col) => (await api("GET", `/api/collections/${col}/records?perPage=1`, { token: su })).json.totalItems;
+const beforeA = await snapshot(companyA), beforeB = await snapshot(companyB);
+const entriesBefore = await totalOf("shift_entries");
+check("у компании A есть данные во многих разделах", Object.values(beforeA).filter((n) => n > 0).length >= 12, beforeA);
+const nameA = (await view("companies", companyA, su)).json.name;
+check("удалить компанию может только администратор Ordius",
+  (await api("POST", `/api/ordius/admin/companies/${companyA}/delete`, { token: B.token, body: { confirm: nameA } })).status === 403);
+check("без точного названия компания не удаляется",
+  (await api("POST", `/api/ordius/admin/companies/${companyA}/delete`, { token: A.token, body: { confirm: nameA.slice(0, -1) } })).status === 400 &&
+  (await view("companies", companyA, su)).status === 200);
+const delA = await api("POST", `/api/ordius/admin/companies/${companyA}/delete`, { token: A.token, body: { confirm: ` ${nameA} ` } });
+check("администратор удаляет компанию", is2xx(delA) && (await view("companies", companyA, su)).status === 404, delA.json);
+const afterA = await snapshot(companyA);
+check("от компании не осталось записей ни в одном разделе", Object.values(afterA).every((n) => n === 0), afterA);
+check("строки смен удалены вместе со сменами", (await totalOf("shift_entries")) < entriesBefore);
+check("данные другой компании не тронуты", JSON.stringify(await snapshot(companyB)) === JSON.stringify(beforeB));
+check("аккаунты людей остаются", (await view("users", A.id, su)).status === 200);
+check("удалённой компании нет в кабинете",
+  !(await api("GET", "/api/ordius/admin/companies", { token: A.token })).json.items.some((c) => c.id === companyA));
+check("повторное удаление — «не найдена»",
+  (await api("POST", `/api/ordius/admin/companies/${companyA}/delete`, { token: A.token, body: { confirm: nameA } })).status === 404);
+
 // ---------- сервер без ключа SMS.ru и с неверным ключом ----------
 // Поднимаем ещё два PocketBase: без ключа и с ключом, который «SMS.ru» не принимает.
 async function extraServer(extraEnv, extraArgs = []) {
