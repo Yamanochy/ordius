@@ -60,6 +60,7 @@ routerAdd("POST", "/api/ordius/connect-codes/{id}/revoke", (e) => {
 //   GET  /api/ordius/admin/summary
 //   GET  /api/ordius/admin/companies
 //   POST /api/ordius/admin/companies/{id}/plan {plan}
+//   POST /api/ordius/admin/companies/{id}/delete {confirm: название компании} — безвозвратно, со всеми данными
 //   GET  /api/ordius/admin/leads
 //   POST /api/ordius/admin/leads/{id} {status?, admin_note?}
 routerAdd("GET", "/api/ordius/admin/summary", (e) => {
@@ -120,6 +121,27 @@ routerAdd("POST", "/api/ordius/admin/companies/{id}/plan", (e) => {
   // запись в журнале компании: владелец видит, что тариф поменял Ordius
   audit(e.app, "update", c, e.auth, { reason: "plan changed by Ordius admin" });
   return e.json(200, { id: c.id, plan });
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/ordius/admin/companies/{id}/delete", (e) => {
+  const adm = require(`${__hooks}/lib/admin.js`);
+  const { normalizePhone } = require(`${__hooks}/lib/util.js`);
+  if (!adm.isAdmin(e.auth, normalizePhone)) throw new ForbiddenError("Только для администратора Ordius");
+  let c = null;
+  try { c = e.app.findRecordById("companies", e.request.pathValue("id")); } catch (_) { throw new NotFoundError("Компания не найдена"); }
+  // защита от случайного нажатия: название вводится вручную, как в списке
+  const confirm = String((e.requestInfo().body || {}).confirm || "").trim();
+  if (!confirm || confirm !== String(c.get("name")).trim()) {
+    throw new BadRequestError("Для удаления введите название компании точно как в списке");
+  }
+  let counts = null;
+  try { counts = adm.deleteCompany(e.app, c.id); } catch (err) {
+    e.app.logger().error("company delete failed", "company", c.id, "error", String(err));
+    throw new BadRequestError("Не получилось удалить компанию, ничего не удалено. Напишите разработчику.");
+  }
+  // в журнале сервера — только номер компании и сколько записей удалено, без названий и персональных данных
+  e.app.logger().info("company deleted by Ordius admin", "company", c.id, "admin", e.auth.id, "records", JSON.stringify(counts));
+  return e.json(200, { id: c.id, deleted: counts });
 }, $apis.requireAuth("users"));
 
 routerAdd("GET", "/api/ordius/admin/leads", (e) => {

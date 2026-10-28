@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { pb, errText } from '../lib/pb.js';
 import { useQuery } from '../lib/data.js';
 import { Link } from '../lib/router.jsx';
+import { useSession } from '../lib/session.jsx';
 import { dayLabel, day10, isoDay, prettyPhone } from '../lib/format.js';
 import { Button, Badge, Field, Icon, PageTitle, ErrorBox, Loading, Sheet, Select, Seg, useToast } from '../ui.jsx';
 
@@ -234,7 +235,39 @@ function CompanySheet({ c, onClose, onDone }) {
       </Field>
       <ErrorBox text={err} />
       <Button variant="primary" block busy={busy} disabled={plan === c.plan} onClick={save}>Сохранить тариф</Button>
+      <DeleteCompany c={c} onDone={onDone} />
     </Sheet>
+  );
+}
+
+// Безвозвратно: компания и все её данные (смены, деньги, техника, фото). Аккаунты людей остаются.
+// Для пробных компаний и когда клиент уходит. Перед удалением — копия: ordius-backup на сервере.
+function DeleteCompany({ c, onDone }) {
+  const toast = useToast();
+  const session = useSession();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const match = name.trim() !== '' && name.trim() === String(c.name).trim();
+  async function remove() {
+    setBusy(true); setErr('');
+    try {
+      await pb.send(`/api/ordius/admin/companies/${c.id}/delete`, { method: 'POST', body: { confirm: name } });
+      toast('Компания удалена');
+      if (session && session.reload) session.reload();
+      onDone();
+    } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  }
+  if (!open) return <Button block variant="ghost" className="danger" onClick={() => setOpen(true)}>Удалить компанию…</Button>;
+  return (
+    <div className="alert danger" style={{ display: 'grid', gap: 12 }}>
+      <p style={{ margin: 0 }}>Удалятся компания и все её данные: люди в составе, смены, деньги, техника, контракты, задачи, фото. Вернуть нельзя. Аккаунты людей останутся.</p>
+      <Field label="Введите название компании"><input value={name} onChange={(e) => setName(e.target.value)} placeholder={c.name} autoComplete="off" /></Field>
+      <ErrorBox text={err} />
+      <Button block className="danger" busy={busy} disabled={!match} onClick={remove}>Удалить навсегда</Button>
+      <Button block variant="ghost" onClick={() => { setOpen(false); setName(''); setErr(''); }}>Отмена</Button>
+    </div>
   );
 }
 
