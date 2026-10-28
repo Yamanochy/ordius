@@ -893,6 +893,35 @@ await api("PATCH", "/api/settings", { token: su, body: { smtp: { enabled: false 
 const deadMail = await postLead({ name: "Без почты" });
 check("почта не работает — заявка всё равно сохраняется", deadMail.status === 200 && (await leadsNow()).some((l) => l.ref === deadMail.json.ref));
 
+// ---------- Кабинет Ordius ----------
+check("кабинет закрыт для всех, кроме администратора",
+  (await api("GET", "/api/ordius/admin/summary", { token: B.token })).status === 403 &&
+  (await api("GET", "/api/ordius/admin/companies", { token: B.token })).status === 403 &&
+  (await api("GET", "/api/ordius/admin/leads", { token: B.token })).status === 403 &&
+  (await api("POST", `/api/ordius/admin/companies/${companyB}/plan`, { token: B.token, body: { plan: "business" } })).status === 403);
+const sum = (await api("GET", "/api/ordius/admin/summary", { token: A.token })).json;
+check("сводка: компании, люди, смены за неделю, новые заявки", sum.companies >= 2 && sum.users >= 5 && sum.people_active >= 2 &&
+  sum.shifts7 >= 1 && sum.leads_new >= 3, sum);
+const cab = (await api("GET", "/api/ordius/admin/companies", { token: A.token })).json.items;
+const cabA = cab.find((c) => c.id === companyA), cabB = cab.find((c) => c.id === companyB);
+check("компании: владелец с телефоном, люди, техника, смены, код подключения", cabA && cabB &&
+  cabA.owner_name === "Иван Петров" && cabA.owner_phone === "+79230000001" && cabA.people >= 2 && cabA.vehicles >= 1 &&
+  cabA.shifts30 >= 1 && !!cabA.last_shift && !!cabA.terms_at && cabB.code_note === "ИП Лютиков" && cabB.plan === "pilot", { cabA, cabB });
+check("в кабинете нет денег и данных работников клиента", !/amount|_kop|phone":"\+7923000000[3-9]/.test(JSON.stringify(cab)));
+check("администратор меняет тариф компании",
+  is2xx(await api("POST", `/api/ordius/admin/companies/${companyB}/plan`, { token: A.token, body: { plan: "start" } })) &&
+  (await view("companies", companyB, B.token)).json.plan === "start");
+check("неизвестный тариф не ставится",
+  (await api("POST", `/api/ordius/admin/companies/${companyB}/plan`, { token: A.token, body: { plan: "vip" } })).status === 400);
+const cabLeads = (await api("GET", "/api/ordius/admin/leads", { token: A.token })).json.items;
+check("заявки с сайта видны в кабинете, новые — «new»", cabLeads.length >= 3 && cabLeads.every((l) => l.status === "new"), cabLeads.length);
+const upd = await api("POST", `/api/ordius/admin/leads/${cabLeads[0].id}`, { token: A.token, body: { status: "in_work", admin_note: "Позвонить в пятницу" } });
+const cabLeads2 = (await api("GET", "/api/ordius/admin/leads", { token: A.token })).json.items;
+check("статус и заметка заявки сохраняются", is2xx(upd) && cabLeads2.find((l) => l.id === cabLeads[0].id).status === "in_work" &&
+  cabLeads2.find((l) => l.id === cabLeads[0].id).admin_note === "Позвонить в пятницу");
+check("неизвестный статус заявки не ставится",
+  (await api("POST", `/api/ordius/admin/leads/${cabLeads[0].id}`, { token: A.token, body: { status: "spam" } })).status === 400);
+
 // ---------- защита от засорения ----------
 for (let i = 0; i < 4; i++) await create("companies", B.token, { terms: TERMS, name: "Б-" + i, connect_key: code1.code });
 const spent = await create("companies", B.token, { terms: TERMS, name: "Б-лишняя", connect_key: code1.code });
