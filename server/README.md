@@ -144,6 +144,38 @@ ordius-status
 
 ## Восстановление
 
+**Хранилище копий недоступно** (`ordius-status`: «копии не было N мин», в журнале `i/o timeout`):
+
+```bash
+curl -sS -m 15 -o /dev/null -w "%{http_code}\n" https://s3.ru1.storage.beget.cloud   # число — связь есть, 000 — нет
+tracepath -n -m 20 193.168.47.225                                                    # где обрывается путь
+```
+
+Связи нет — обращение в поддержку Timeweb Cloud (исходящий трафик сервера) и Beget (доступ к S3) с выводом этих
+команд. Провайдер хранилища потерял данные или долго недоступен — переезд в другое хранилище (бакет и ключи
+заводятся заранее; пароль шифрования копий остаётся прежним):
+
+```bash
+ordius-storage-switch --pool ru-7 --bucket <имя бакета>                    # Selectel, Москва (ru-1 — Санкт-Петербург)
+ordius-storage-switch --endpoint <адрес S3 без https://> --bucket <имя>     # любое другое S3 в России
+```
+
+Команда спросит Access key и Secret key (ввод скрыт), проверит доступ, создаст зашифрованное хранилище и сразу
+сделает копию. Не получилось — вернёт прежние настройки. После переезда — поправить таблицу в начале файла и подать
+в Роскомнадзор уведомление об изменении (новое место хранения копий) не позднее 15-го числа следующего месяца. Пока связи нет, каждый час всё равно снимается свежий снимок базы на самом сервере
+(`/var/lib/ordius/backup/data.db`), а `ordius-deploy` перед выкладкой откладывает его в
+`/var/lib/ordius/backup/before-deploy-<время>.db` (хранятся три последних) и выкладывает. Откатить базу на такой снимок:
+
+```bash
+systemctl stop ordius-pocketbase
+mv /var/lib/ordius/pb_data/data.db /var/lib/ordius/pb_data/data.db.broken-$(date -u +%Y%m%dT%H%M%SZ)
+rm -f /var/lib/ordius/pb_data/data.db-wal /var/lib/ordius/pb_data/data.db-shm
+cp /var/lib/ordius/backup/before-deploy-<время>.db /var/lib/ordius/pb_data/data.db
+chown pocketbase: /var/lib/ordius/pb_data/data.db
+systemctl start ordius-pocketbase && ordius-status
+```
+
+
 **Откатить данные на этом же сервере** (например, после ошибочного удаления):
 
 ```bash
