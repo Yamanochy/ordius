@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Переезд копий Ordius в другое хранилище S3 — когда прежнее недоступно или провайдер потерял данные.
+#   sudo ordius-storage-switch --pool ru-7 --bucket ordius-backup               — Selectel (пул ru-7)
+#   sudo ordius-storage-switch --endpoint s3.example.ru --bucket имя [--region r]  — любое S3 в России
+# Спрашивает Access key и Secret key нового хранилища (ввод скрыт), проверяет доступ, создаёт в бакете
+# зашифрованное хранилище restic с ПРЕЖНИМ паролем шифрования копий и сразу делает первую копию.
+# Прежние настройки остаются рядом (ordius.conf.before-<время>, backup.env.before-<время>); если что-то
+# не получилось — они возвращаются обратно, копирование продолжает работать как раньше.
+set -Eeuo pipefail
+# shellcheck source=../lib/common.sh
+source "${ORDIUS_LIB:-/usr/local/lib/ordius}/common.sh"
+
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
+
+POOL="" ENDPOINT="" REGION="" BUCKET=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pool)     POOL=${2:-}; shift 2 ;;
+    --endpoint) ENDPOINT=${2:-}; shift 2 ;;
+    --region)   REGION=${2:-}; shift 2 ;;
+    --bucket)   BUCKET=${2:-}; shift 2 ;;
+    -h|--help)  usage; exit 0 ;;
+    *) usage; die "неизвестный параметр: $1" ;;
+  esac
+done
+if [ -n "$POOL" ]; then
+  [[ "$POOL" =~ ^[a-z]{2,4}-[0-9]+$ ]] || die "--pool — пул Selectel, например ru-7"
+  ENDPOINT=${ENDPOINT:-s3.${POOL}.storage.selcloud.ru}
+  REGION=${REGION:-$POOL}
+fi
+[ -n "$ENDPOINT" ] && [ -n "$BUCKET" ] || { usage; die "нужны --bucket и --pool или --endpoint"; }
+[[ "$ENDPOINT" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || die "--endpoint — адрес без https://, например s3.ru-7.storage.selcloud.ru"
+[[ "$BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "--bucket — имя бакета: строчные латинские буквы, цифры, точка, дефис"
+
+CONF="$ORDIUS_ETC/ordius.conf" ENV="$ORDIUS_ETC/backup.env"
+[ -r "$CONF" ] || die "нет $CONF — сначала запустите setup.sh"
+[ -s "$ORDIUS_ETC/restic.pass" ] || die "нет пароля шифрования копий $ORDIUS_ETC/restic.pass"
+
+# Пока меняются настройки, почасовая копия не запускается (тот же замок, что у ordius-backup).
+exec 9>"$ORDIUS_DATA/.backup.lock"
+flock -w 900 9 || die "идёт копирование — повторите через несколько минут"
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+cp -p "$CONF" "$CONF.before-$stamp"
+[ -e "$ENV" ] && cp -p "$ENV" "$ENV.before-$stamp"
+switched=0
+rollback() {
+  cp -p "$CONF.before-$stamp" "$CONF"
+  if [ -e "$ENV.before-$stamp" ]; then cp -p "$ENV.before-$stamp" "$ENV"; else rm -f "$ENV"; fi
+  warn "переезд не удался — вернул прежние настройки хранилища"
+}
+on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$switched" = 0 ]; then rollback; fi
+  exit "$rc"
+}
+trap on_exit EXIT
+
+# Строка KEY=VALUE в ordius.conf: заменить, если есть, иначе дописать.
+set_conf() {
+  local key=$1 value=$2
+  if grep -q "^$key=" "$CONF"; then sed -i "s|^$key=.*|$key=$value|" "$CONF"; else printf '%s=%s\n' "$key" "$value" >> "$CONF"; fi
+}
+set_conf S3_ENDPOINT "$ENDPOINT"
+set_conf S3_BUCKET "$BUCKET"
+set_conf S3_REGION "$REGION"
+set_conf S3_LOOKUP "${ORDIUS_S3_LOOKUP:-dns}"   # подходящие регион и стиль адресации подберёт ordius-s3-setup
+[ -n "${ORDIUS_S3_SCHEME:-}" ] && set_conf S3_SCHEME "$ORDIUS_S3_SCHEME"
+
+# Ключи — вводом с клавиатуры (в историю команд и в журнал не попадают) или из окружения (проверки).
+ask_key() {
+  local prompt=$1 var=$2 value=${!2:-}
+  if [ -z "$value" ] && { printf '\033[?2004l  %s: ' "$prompt" > /dev/tty; } 2>/dev/null; then
+    IFS= read -r -s value < /dev/tty || true
+    printf '\n' > /dev/tty
+  fi
+  value=$(printf '%s' "$value" | tr -d '[:space:]')
+  [ -n "$value" ] || die "$prompt не введён"
+  printf -v "$var" '%s' "$value"
+}
+echo "  Вставьте ключи нового хранилища. Символы не видны — это нормально. Вставка: правая кнопка мыши."
+ask_key "Access key" ORDIUS_S3_ACCESS_KEY
+ask_key "Secret key" ORDIUS_S3_SECRET_KEY
+umask 077
+printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' "$ORDIUS_S3_ACCESS_KEY" "$ORDIUS_S3_SECRET_KEY" > "$ENV"
+umask 022
+chmod 600 "$ENV"
+unset ORDIUS_S3_ACCESS_KEY ORDIUS_S3_SECRET_KEY
+
+ordius-s3-setup || die "нет доступа к бакету $BUCKET (причина строкой выше)"
+load_backup_env
+if r cat config >/dev/null 2>&1; then
+  log "в бакете уже есть хранилище копий, пароль шифрования подходит — продолжаю в нём"
+elif r init >"$ORDIUS_DATA/restic-init.log" 2>&1; then
+  log "хранилище копий создано и зашифровано прежним паролем"
+else
+  tail -5 "$ORDIUS_DATA/restic-init.log" >&2
+  grep -q 'already initialized' "$ORDIUS_DATA/restic-init.log" && die "в бакете уже есть копии с другим паролем — выберите пустой бакет"
+  die "restic не смог создать хранилище копий (строки выше)"
+fi
+
+# Первая копия — уже без замка: его берёт сам ordius-backup.
+exec 9>&-
+ordius-backup || die "первая копия в новом хранилище не сделалась"
+switched=1
+log "готово: копии идут в $ENDPOINT, бакет $BUCKET; прежние настройки — $CONF.before-$stamp"
+echo "  Ещё: поправить таблицу «Копии» в server/README.md и подать в Роскомнадзор уведомление об изменении"
+echo "  (новое место хранения резервных копий) — не позднее 15-го числа следующего месяца."

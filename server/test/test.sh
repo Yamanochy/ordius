@@ -17,17 +17,18 @@ done
 
 # --- 1. статический анализ -------------------------------------------------
 check "shellcheck: setup.sh, lib, bin" \
-  "shellcheck -x -S warning '$HERE/setup.sh' '$HERE/lib/common.sh' $(printf "'%s' " "$HERE"/bin/ordius-backup "$HERE"/bin/ordius-maintain "$HERE"/bin/ordius-restore "$HERE"/bin/ordius-deploy "$HERE"/bin/ordius-pb-update "$HERE"/bin/ordius-status)"
+  "shellcheck -x -S warning '$HERE/setup.sh' '$HERE/lib/common.sh' $(printf "'%s' " "$HERE"/bin/ordius-backup "$HERE"/bin/ordius-maintain "$HERE"/bin/ordius-restore "$HERE"/bin/ordius-deploy "$HERE"/bin/ordius-pb-update "$HERE"/bin/ordius-status "$HERE"/bin/ordius-storage-switch)"
 check "python: ordius-s3-setup компилируется" "python3 -c \"import ast,sys; ast.parse(open(sys.argv[1]).read())\" '$HERE/bin/ordius-s3-setup'"
-check "bash -n: все скрипты" "for f in '$HERE/setup.sh' '$HERE'/bin/ordius-backup '$HERE'/bin/ordius-maintain '$HERE'/bin/ordius-restore '$HERE'/bin/ordius-deploy '$HERE'/bin/ordius-pb-update '$HERE'/bin/ordius-status; do bash -n \"\$f\" || exit 1; done"
+check "bash -n: все скрипты" "for f in '$HERE/setup.sh' '$HERE'/bin/ordius-backup '$HERE'/bin/ordius-maintain '$HERE'/bin/ordius-restore '$HERE'/bin/ordius-deploy '$HERE'/bin/ordius-pb-update '$HERE'/bin/ordius-status '$HERE'/bin/ordius-storage-switch; do bash -n \"\$f\" || exit 1; done"
 check "systemd: служба PocketBase слушает только 127.0.0.1" "grep -q -- '--http=127.0.0.1:8090' '$HERE/systemd/ordius-pocketbase.service'"
 check "Caddy: панель администратора закрыта снаружи" "grep -q '@admin path /_ /_/\*' '$HERE/config/Caddyfile' && grep -q 'respond @admin 404' '$HERE/config/Caddyfile'"
 
 # --- 2. окружение ------------------------------------------------------------
 T=$(mktemp -d)
-MOTO_PID="" HC_PID=""
+MOTO_PID="" MOTO2_PID="" HC_PID=""
 cleanup() {
   [ -n "$MOTO_PID" ] && kill "$MOTO_PID" 2>/dev/null
+  [ -n "$MOTO2_PID" ] && kill "$MOTO2_PID" 2>/dev/null
   [ -n "$HC_PID" ] && kill "$HC_PID" 2>/dev/null
   rm -rf "$T"
 }
@@ -162,6 +163,28 @@ cp "$T/sbin/ordius-status" "$T/status.before"
 check "deploy: битый скрипт не ставит, прежние остаются" "ORDIUS_SBIN='$T/sbin' ordius-deploy --no-restart >/dev/null 2>&1 && cmp -s '$T/sbin/ordius-status' '$T/status.before'"
 git -C "$src" rm -q backend/pb_hooks/main.pb.js && git -C "$src" -c user.name=t -c user.email=t@t commit -qm rm
 check "deploy: удалённый хук исчезает, миграции остаются" "ordius-deploy --no-restart >/dev/null 2>&1 && [ ! -e '$ORDIUS_OPT/pb_hooks/main.pb.js' ] && [ -s '$ORDIUS_OPT/pb_migrations/1_init.js' ]"
+
+# --- 8. переезд в другое хранилище (прежнее недоступно) -------------------------
+PORT2=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+moto_server -H 127.0.0.1 -p "$PORT2" >"$T/moto2.log" 2>&1 & MOTO2_PID=$!
+for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT2/" 2>/dev/null && break; sleep 0.2; done
+python3 - "$PORT2" <<'PY'
+import sys, boto3
+s3 = boto3.client("s3", endpoint_url=f"http://127.0.0.1:{sys.argv[1]}", region_name="us-east-1",
+                  aws_access_key_id="new", aws_secret_access_key="new")
+s3.create_bucket(Bucket="ordius-backup-new")
+PY
+sw="ORDIUS_S3_SCHEME=http ORDIUS_S3_LOOKUP=path ORDIUS_S3_ACCESS_KEY=new ORDIUS_S3_SECRET_KEY=new ordius-storage-switch"
+cp "$ORDIUS_ETC/ordius.conf" "$T/conf.old"
+check "storage-switch: несуществующий бакет — ошибка" "! eval \"$sw --endpoint 127.0.0.1:$PORT2 --bucket no-such-bucket --region us-east-1\" >/dev/null 2>&1"
+check "storage-switch: после ошибки настройки прежние" "cmp -s '$ORDIUS_ETC/ordius.conf' '$T/conf.old' && grep -qx 'AWS_ACCESS_KEY_ID=test' '$ORDIUS_ETC/backup.env'"
+rm -f "$ORDIUS_DATA/backup/last-ok"
+check "storage-switch: переезд в новое хранилище и первая копия" "eval \"$sw --endpoint 127.0.0.1:$PORT2 --bucket ordius-backup-new --region us-east-1\" >/dev/null 2>&1"
+check "storage-switch: настройки указывают на новое хранилище, прочее сохранено" "grep -qx 'S3_ENDPOINT=127.0.0.1:$PORT2' '$ORDIUS_ETC/ordius.conf' && grep -qx 'S3_BUCKET=ordius-backup-new' '$ORDIUS_ETC/ordius.conf' && grep -qx 'DOMAIN=app.test' '$ORDIUS_ETC/ordius.conf' && grep -q '^HEALTHCHECK_URL=' '$ORDIUS_ETC/ordius.conf'"
+check "storage-switch: новые ключи записаны, файл закрыт" "grep -qx 'AWS_ACCESS_KEY_ID=new' '$ORDIUS_ETC/backup.env' && [ \"\$(stat -c %a '$ORDIUS_ETC/backup.env')\" = 600 ]"
+check "storage-switch: прежние настройки отложены" "ls '$ORDIUS_ETC'/ordius.conf.before-* '$ORDIUS_ETC'/backup.env.before-* >/dev/null 2>&1"
+check "storage-switch: копия в новом хранилище, отметка last-ok" "[ -s '$ORDIUS_DATA/backup/last-ok' ] && (load_backup_env; [ \"\$(r snapshots --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')\" = 1 ])"
+check "storage-switch: из новой копии восстанавливается" "ordius-maintain --test >/dev/null 2>&1"
 
 echo
 if [ "$failed" -eq 0 ]; then echo "Все проверки прошли"; else echo "$failed проверок не прошло"; fi
