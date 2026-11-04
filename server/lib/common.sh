@@ -94,6 +94,26 @@ report_failure() {
   return "$rc"
 }
 
+# Копия перед выкладкой. Если хранилище копий недоступно, ordius-backup к этому моменту уже снял свежий
+# согласованный снимок базы на этом сервере ($SNAP_DIR/data.db, шаг 1). Его откладываем отдельным файлом —
+# для отката неудачной выкладки этого хватает (фото выкладка не трогает) — и выкладку разрешаем.
+# Сбой копирования при этом не скрывается: ordius-backup уже записал ошибку и отправил /fail мониторингу.
+# 0 — можно выкладывать, 1 — нельзя (нет свежего целого снимка).
+predeploy_backup() {
+  ordius-backup && return 0
+  local snap="$SNAP_DIR/data.db" keep
+  if [ -s "$snap" ] && [ -n "$(find "$snap" -mmin -10 2>/dev/null)" ] && db_ok "$snap"; then
+    keep="$SNAP_DIR/before-deploy-$(date -u +%Y%m%dT%H%M%SZ).db"
+    cp -p "$snap" "$keep"
+    chmod 600 "$keep"
+    # три последних снимка перед выкладкой, старше — удаляем
+    find "$SNAP_DIR" -maxdepth 1 -name 'before-deploy-*.db' -printf '%T@ %p\n' | sort -rn | tail -n +4 | cut -d' ' -f2- | xargs -r rm -f
+    warn "копия не ушла в хранилище; снимок базы перед выкладкой сохранён на сервере: $keep"
+    return 0
+  fi
+  return 1
+}
+
 # Проверка целостности базы SQLite.
 db_ok() {
   [ -s "$1" ] && [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>/dev/null)" = "ok" ]

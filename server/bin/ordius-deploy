@@ -53,7 +53,7 @@ fi
 
 if [ "$restart" = "1" ] && [ -r "$ORDIUS_ETC/backup.env" ]; then
   log "копия перед выкладкой"
-  ordius-backup || die "копия перед выкладкой не удалась — выкладка отменена"
+  predeploy_backup || die "копия перед выкладкой не удалась и свежего снимка базы нет — выкладка отменена"
 fi
 
 mkdir -p "$ORDIUS_OPT/pb_migrations" "$ORDIUS_OPT/pb_hooks" "$ORDIUS_OPT/pb_public"

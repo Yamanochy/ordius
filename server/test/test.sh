@@ -135,6 +135,14 @@ kill "$MOTO_PID"; wait "$MOTO_PID" 2>/dev/null || true; MOTO_PID=""
 : > "$T/pings"
 check "backup: хранилище недоступно — ошибка, а не тишина" "! timeout 120 ordius-backup >/dev/null 2>&1"
 check "backup: оповещение о сбое /fail" "grep -qx '/hc/fail' '$T/pings'"
+# перед выкладкой: хранилище недоступно, но свежий снимок базы на сервере есть — откладываем его и выкладываем
+pre="source '$HERE/lib/common.sh'; load_backup_env; predeploy_backup"
+check "deploy: хранилище недоступно — снимок базы откладывается, выкладка разрешена" \
+  "timeout 150 bash -c \"$pre\" >/dev/null 2>&1 && ls '$ORDIUS_DATA'/backup/before-deploy-*.db >/dev/null 2>&1"
+check "deploy: отложенный снимок цел" "[ \"\$(sqlite3 \"\$(ls -t '$ORDIUS_DATA'/backup/before-deploy-*.db | head -1)\" 'PRAGMA integrity_check;')\" = ok ]"
+mv "$DB" "$DB.away"; touch -d '-2 hours' "$ORDIUS_DATA/backup/data.db"
+check "deploy: хранилище недоступно и снимок старый — выкладка запрещена" "! timeout 150 bash -c \"$pre\" >/dev/null 2>&1"
+mv "$DB.away" "$DB"
 
 # --- 7. выкладка ------------------------------------------------------------
 src="$T/src"; mkdir -p "$src/backend/pb_migrations" "$src/backend/pb_hooks" "$src/server/config"

@@ -144,6 +144,28 @@ ordius-status
 
 ## Восстановление
 
+**Хранилище копий недоступно** (`ordius-status`: «копии не было N мин», в журнале `i/o timeout`):
+
+```bash
+curl -sS -m 15 -o /dev/null -w "%{http_code}\n" https://s3.ru1.storage.beget.cloud   # число — связь есть, 000 — нет
+tracepath -n -m 20 193.168.47.225                                                    # где обрывается путь
+```
+
+Связи нет — обращение в поддержку Timeweb Cloud (исходящий трафик сервера) и Beget (доступ к S3) с выводом этих
+команд. Пока связи нет, каждый час всё равно снимается свежий снимок базы на самом сервере
+(`/var/lib/ordius/backup/data.db`), а `ordius-deploy` перед выкладкой откладывает его в
+`/var/lib/ordius/backup/before-deploy-<время>.db` (хранятся три последних) и выкладывает. Откатить базу на такой снимок:
+
+```bash
+systemctl stop ordius-pocketbase
+mv /var/lib/ordius/pb_data/data.db /var/lib/ordius/pb_data/data.db.broken-$(date -u +%Y%m%dT%H%M%SZ)
+rm -f /var/lib/ordius/pb_data/data.db-wal /var/lib/ordius/pb_data/data.db-shm
+cp /var/lib/ordius/backup/before-deploy-<время>.db /var/lib/ordius/pb_data/data.db
+chown pocketbase: /var/lib/ordius/pb_data/data.db
+systemctl start ordius-pocketbase && ordius-status
+```
+
+
 **Откатить данные на этом же сервере** (например, после ошибочного удаления):
 
 ```bash
